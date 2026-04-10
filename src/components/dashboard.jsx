@@ -13,6 +13,7 @@ export default function Dashboard() {
   const [date, setDate] = useState("");
   const [absenType, setAbsenType] = useState(""); 
   const [isLoading, setIsLoading] = useState(false); 
+  const [loadingMsg, setLoadingMsg] = useState(""); // State untuk pesan loading
   const fileInputRef = useRef(null);
   const router = useRouter();
 
@@ -46,48 +47,62 @@ export default function Dashboard() {
     if (!file) return;
 
     setIsLoading(true); 
+    setLoadingMsg(`Memproses ${absenType}...`); // Tampilkan pesan di layar, bukan alert
+
     try {
       const user = auth.currentUser;
       if (!user) throw new Error("Anda belum login!");
 
-      alert(`Memproses ${absenType} dan mengambil GPS... Mohon tunggu.`);
+      // --- 1. SIAPKAN PENCARI GPS (TANPA AWAIT DULU) ---
+      const getGPS = new Promise((resolve) => {
+        if (!navigator.geolocation) return resolve("GPS Tidak Didukung");
+        
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(`${pos.coords.latitude},${pos.coords.longitude}`),
+          () => resolve("Gagal mendapat GPS"),
+          { 
+            enableHighAccuracy: true, 
+            timeout: 7000,        // Maksimal tunggu GPS 7 detik saja
+            maximumAge: 30000     // Boleh pakai data GPS dari 30 detik terakhir agar cepat
+          }
+        );
+      });
 
-      // --- 1. MENGAMBIL LOKASI GPS (BARU) ---
-      let lokasiAbsen = "Lokasi ditolak/gagal";
-      if (navigator.geolocation) {
-        try {
-          const posisi = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
-          });
-          lokasiAbsen = `${posisi.coords.latitude},${posisi.coords.longitude}`;
-        } catch (gpsError) {
-          console.warn("Gagal mendapat GPS:", gpsError);
-        }
-      }
+      // --- 2. SIAPKAN KOMPRESI FOTO (TANPA AWAIT DULU) ---
+      const options = { 
+        maxSizeMB: 0.5,         // Turunkan jadi 500 KB saja sudah cukup tajam
+        maxWidthOrHeight: 800,  // Dimensi diturunkan agar kompresi instan
+        useWebWorker: true 
+      };
+      const compressImage = imageCompression(file, options);
 
-      // --- 2. KOMPRESI GAMBAR (seperti kode Anda sebelumnya) ---
-      const options = { maxSizeMB: 1, maxWidthOrHeight: 1024, useWebWorker: true };
-      const compressedFile = await imageCompression(file, options);
+      // --- 3. JALANKAN GPS & KOMPRESI BERSAMAAN (PARALEL) ---
+      // Ini rahasia utama agar aplikasi terasa 2x lipat lebih cepat
+      const [lokasiAbsen, compressedFile] = await Promise.all([getGPS, compressImage]);
 
-      // --- 3. UPLOAD KE STORAGE ---
+      setLoadingMsg("Mengunggah data...");
+
+      // --- 4. UPLOAD KE STORAGE ---
       const storageRef = ref(storage, `absensi/${user.uid}/${Date.now()}_${compressedFile.name}`);
       await uploadBytes(storageRef, compressedFile);
       const photoURL = await getDownloadURL(storageRef);
 
-      // --- 4. SIMPAN KE FIRESTORE DENGAN LOKASI ---
+      // --- 5. SIMPAN KE FIRESTORE ---
       await addDoc(collection(db, "absensi_logs"), {
         userId: user.uid,
         tipe_absen: absenType,
         waktu: serverTimestamp(),
         foto_url: photoURL,
-        lokasi: lokasiAbsen // <-- Simpan koordinat GPS ke database
+        lokasi: lokasiAbsen
       });
 
-      alert(`Sukses! ${absenType} berhasil dicatat.`);
+      setLoadingMsg(`Sukses! ${absenType} berhasil.`);
+      setTimeout(() => setLoadingMsg(""), 3000); // Pesan sukses hilang otomatis dalam 3 detik
       
     } catch (error) {
       console.error("Error absensi:", error);
-      alert("Gagal melakukan absensi. Pastikan koneksi internet/GPS menyala.");
+      alert("Gagal melakukan absensi. Pastikan koneksi internet stabil.");
+      setLoadingMsg("");
     } finally {
       setIsLoading(false); 
       if (fileInputRef.current) fileInputRef.current.value = ""; 
@@ -121,6 +136,12 @@ export default function Dashboard() {
         <h1 className="text-6xl font-bold text-gray-800 my-2">{time}</h1>
         <p className="text-gray-400 text-lg">{date}</p>
       </div>
+      {/* Loading Message */}
+      {loadingMsg && (
+        <div className="bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold inline-block animate-pulse shadow-sm">
+          {loadingMsg}
+        </div>
+      )}
 
       {/* Input File Tersembunyi untuk Kamera */}
       <input 
