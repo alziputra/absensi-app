@@ -143,9 +143,17 @@ export default function Dashboard() {
 
       {/* Header Nama & Jam */}
       <div className="text-center z-10 mb-8 mt-4">
-        <h2 className="text-xl font-semibold text-gray-800">Alzi Rahmana Putra</h2>
+        {/* Hapus "Alzi Rahmana Putra" dan ganti dengan {userName} */}
+        <h2 className="text-xl font-semibold text-gray-800">{userName}</h2> 
+        
         <h1 className="text-6xl font-bold text-gray-800 my-2">{time}</h1>
-        <p className="text-gray-400 text-lg">{date}</p>
+        <p className="text-gray-400 text-lg mb-4">{date}</p>
+        
+        {loadingMsg && (
+          <div className="bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold inline-block animate-pulse shadow-sm">
+            {loadingMsg}
+          </div>
+        )}
       </div>
       {/* Loading Message */}
       {loadingMsg && (
