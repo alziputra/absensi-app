@@ -11,17 +11,28 @@ import imageCompression from 'browser-image-compression';
 export default function Dashboard() {
   const [time, setTime] = useState("");
   const [date, setDate] = useState("");
+  const [userName, setUserName] = useState("Memuat...");
   const [absenType, setAbsenType] = useState(""); 
   const [isLoading, setIsLoading] = useState(false); 
-  const [loadingMsg, setLoadingMsg] = useState(""); // State untuk pesan loading
+  const [loadingMsg, setLoadingMsg] = useState("");
   const fileInputRef = useRef(null);
   const router = useRouter();
 
-  // Proteksi Halaman: Cek apakah user sudah login
+  // Proteksi Halaman & Ambil Data User
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.push('/'); 
+      } else {
+        // Logika mengambil nama
+        if (user.displayName) {
+          setUserName(user.displayName); // Jika ada nama lengkap di Firebase
+        } else if (user.email) {
+          // Jika tidak ada nama, ambil dari email (contoh: budi@pt.com jadi "Budi")
+          const namaDariEmail = user.email.split('@')[0];
+          const namaKapital = namaDariEmail.charAt(0).toUpperCase() + namaDariEmail.slice(1);
+          setUserName(namaKapital);
+        }
       }
     });
     return () => unsubscribe();
