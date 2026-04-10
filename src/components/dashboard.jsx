@@ -50,43 +50,47 @@ export default function Dashboard() {
       const user = auth.currentUser;
       if (!user) throw new Error("Anda belum login!");
 
-      alert(`Memproses ${absenType} dan mengompres foto... Mohon tunggu.`);
+      alert(`Memproses ${absenType} dan mengambil GPS... Mohon tunggu.`);
 
-      // --- PROSES KOMPRESI GAMBAR ---
-      const options = {
-        maxSizeMB: 1,          // Maksimal ukuran file 1 MB
-        maxWidthOrHeight: 1024, // Maksimal dimensi gambar 1024 pixels
-        useWebWorker: true     // Menggunakan Web Worker agar HP tidak lag saat kompresi
-      };
-      
-      console.log(`Ukuran asli: ${file.size / 1024 / 1024} MB`);
+      // --- 1. MENGAMBIL LOKASI GPS (BARU) ---
+      let lokasiAbsen = "Lokasi ditolak/gagal";
+      if (navigator.geolocation) {
+        try {
+          const posisi = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+          });
+          lokasiAbsen = `${posisi.coords.latitude},${posisi.coords.longitude}`;
+        } catch (gpsError) {
+          console.warn("Gagal mendapat GPS:", gpsError);
+        }
+      }
+
+      // --- 2. KOMPRESI GAMBAR (seperti kode Anda sebelumnya) ---
+      const options = { maxSizeMB: 1, maxWidthOrHeight: 1024, useWebWorker: true };
       const compressedFile = await imageCompression(file, options);
-      console.log(`Ukuran setelah kompresi: ${compressedFile.size / 1024 / 1024} MB`);
-      // -------------------------------
 
-      // 1. Upload Gambar yang SUDAH DIKOMPRESI ke Firebase Storage
+      // --- 3. UPLOAD KE STORAGE ---
       const storageRef = ref(storage, `absensi/${user.uid}/${Date.now()}_${compressedFile.name}`);
-      await uploadBytes(storageRef, compressedFile); // Gunakan compressedFile, bukan file asli
+      await uploadBytes(storageRef, compressedFile);
       const photoURL = await getDownloadURL(storageRef);
 
-      // 2. Simpan Data ke Firestore
+      // --- 4. SIMPAN KE FIRESTORE DENGAN LOKASI ---
       await addDoc(collection(db, "absensi_logs"), {
         userId: user.uid,
         tipe_absen: absenType,
         waktu: serverTimestamp(),
         foto_url: photoURL,
+        lokasi: lokasiAbsen // <-- Simpan koordinat GPS ke database
       });
 
       alert(`Sukses! ${absenType} berhasil dicatat.`);
       
     } catch (error) {
       console.error("Error absensi:", error);
-      alert("Gagal melakukan absensi. Pastikan koneksi internet stabil.");
+      alert("Gagal melakukan absensi. Pastikan koneksi internet/GPS menyala.");
     } finally {
       setIsLoading(false); 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""; 
-      }
+      if (fileInputRef.current) fileInputRef.current.value = ""; 
     }
   };
 

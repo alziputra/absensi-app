@@ -2,18 +2,17 @@
 import { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { onAuthStateChanged, signOut } from 'firebase/auth'; // Tambahan signOut
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link'; // Tambahan Link untuk navigasi Next.js
+import Link from 'next/link';
 
 export default function DataAbsensi() {
   const [logs, setLogs] = useState([]);
   const [activeTab, setActiveTab] = useState('Absen Masuk'); 
   const [isLoading, setIsLoading] = useState(true);
-  const [isMenuOpen, setIsMenuOpen] = useState(false); // State untuk Sidebar Menu
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const router = useRouter();
 
-  // Cek Login
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -25,7 +24,6 @@ export default function DataAbsensi() {
     return () => unsubscribe();
   }, [router]);
 
-  // Ambil Data Firestore
   const fetchData = async (userId) => {
     setIsLoading(true);
     try {
@@ -46,11 +44,10 @@ export default function DataAbsensi() {
     }
   };
 
-  // Fungsi Keluar (Logout)
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      router.push('/'); // Kembali ke halaman login
+      router.push('/');
     } catch (error) {
       console.error("Gagal logout:", error);
       alert("Gagal keluar dari akun.");
@@ -67,7 +64,6 @@ export default function DataAbsensi() {
         <div className="font-bold text-xl flex items-center gap-2">
           <span className="text-blue-400">⚡</span> AppAbsensi
         </div>
-        {/* Tombol Buka Menu */}
         <button 
           onClick={() => setIsMenuOpen(true)}
           className="bg-white text-black px-3 py-1 rounded cursor-pointer hover:bg-gray-200 transition"
@@ -76,16 +72,14 @@ export default function DataAbsensi() {
         </button>
       </header>
 
-      {/* --- BAGIAN SIDEBAR MENU (Mulai) --- */}
-      {/* Latar Belakang Gelap (Overlay) */}
+      {/* --- BAGIAN SIDEBAR MENU --- */}
       {isMenuOpen && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-40 transition-opacity"
-          onClick={() => setIsMenuOpen(false)} // Klik di luar menu untuk menutup
+          onClick={() => setIsMenuOpen(false)}
         ></div>
       )}
 
-      {/* Panel Menu Samping */}
       <div 
         className={`fixed top-0 right-0 h-full w-64 bg-[#1a1c23] text-white z-50 flex flex-col transform transition-transform duration-300 ease-in-out ${
           isMenuOpen ? 'translate-x-0' : 'translate-x-full'
@@ -93,7 +87,6 @@ export default function DataAbsensi() {
       >
         <div className="p-5 border-b border-gray-700 flex justify-between items-center">
           <span className="font-bold text-lg">Menu</span>
-          {/* Tombol Tutup (X) */}
           <button 
             onClick={() => setIsMenuOpen(false)}
             className="text-gray-400 hover:text-white text-2xl leading-none"
@@ -102,20 +95,12 @@ export default function DataAbsensi() {
           </button>
         </div>
 
-        {/* Daftar Link Navigasi */}
         <nav className="flex-1 p-5 flex flex-col gap-6 mt-2">
-          <Link href="/dashboard" className="text-gray-300 hover:text-white transition-colors">
-            Home
-          </Link>
-          <Link href="/data-absensi" className="text-white font-semibold transition-colors">
-            Data Absensi
-          </Link>
-          <Link href="/data-visit" className="text-gray-300 hover:text-white transition-colors">
-            Data Visit
-          </Link>
+          <Link href="/dashboard" className="text-gray-300 hover:text-white transition-colors">Home</Link>
+          <Link href="/data-absensi" className="text-white font-semibold transition-colors">Data Absensi</Link>
+          <Link href="/data-visit" className="text-gray-300 hover:text-white transition-colors">Data Visit</Link>
         </nav>
 
-        {/* Tombol Keluar di bagian paling bawah */}
         <div className="p-5 mt-auto mb-4">
           <button 
             onClick={handleLogout}
@@ -125,8 +110,6 @@ export default function DataAbsensi() {
           </button>
         </div>
       </div>
-      {/* --- BAGIAN SIDEBAR MENU (Selesai) --- */}
-
 
       {/* Konten Utama (Tabel) */}
       <main className="max-w-6xl mx-auto p-6 relative z-10">
@@ -160,6 +143,7 @@ export default function DataAbsensi() {
                     <th className="p-4 font-semibold text-sm text-gray-700">Tanggal ↓</th>
                     <th className="p-4 font-semibold text-sm text-gray-700">Jam</th>
                     <th className="p-4 font-semibold text-sm text-gray-700">Status / Telat</th>
+                    <th className="p-4 font-semibold text-sm text-gray-700">Lokasi</th> {/* KOLOM BARU */}
                     <th className="p-4 font-semibold text-sm text-gray-700">Bukti Foto</th>
                   </tr>
                 </thead>
@@ -174,6 +158,23 @@ export default function DataAbsensi() {
                           <td className="p-4 text-sm text-gray-800">{tgl}</td>
                           <td className="p-4 text-sm text-gray-800">{jam}</td>
                           <td className="p-4 text-sm text-gray-800">00:00:00</td>
+                          
+                          {/* MENAMPILKAN LOKASI */}
+                          <td className="p-4 text-sm text-gray-800">
+                            {log.lokasi ? (
+                              <a 
+                                href={`https://www.google.com/maps?q=${log.lokasi}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-blue-500 hover:underline"
+                              >
+                                {log.lokasi}
+                              </a>
+                            ) : (
+                              <span className="text-gray-400 text-xs">Tidak ada GPS</span>
+                            )}
+                          </td>
+
                           <td className="p-4 text-sm text-blue-600 underline">
                             <a href={log.foto_url} target="_blank" rel="noopener noreferrer">Lihat Foto</a>
                           </td>
@@ -182,7 +183,8 @@ export default function DataAbsensi() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="4" className="p-8 text-center text-gray-500">
+                      {/* colSpan diubah menjadi 5 karena ada tambahan kolom Lokasi */}
+                      <td colSpan="5" className="p-8 text-center text-gray-500">
                         Belum ada data {activeTab.toLowerCase()}.
                       </td>
                     </tr>
