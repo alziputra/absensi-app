@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react';
 import { db, storage, auth } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore'; // Tambah query, where, getDocs
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -43,7 +43,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // FUNGSI BARU: Mengecek apakah user sudah Absen Masuk hari ini
+  // Fungsi untuk mengecek apakah user sudah melakukan Absen Masuk hari ini
   const checkAbsenMasukHariIni = async (uid) => {
     const q = query(
       collection(db, "absensi_logs"), 
@@ -65,7 +65,7 @@ export default function Dashboard() {
     const user = auth.currentUser;
     if (!user) return alert("Sesi login tidak valid!");
 
-    // LOGIKA CEK ABSEN PULANG
+    // Jika user memilih Absen Pulang, cek apakah sudah Absen Masuk hari ini
     if (type === 'Absen Pulang') {
       setIsLoading(true);
       setLoadingMsg("Mengecek data absen masuk...");
@@ -75,7 +75,7 @@ export default function Dashboard() {
 
       if (!sudahAbsenMasuk) {
         alert("Peringatan: Anda belum Absen Masuk hari ini! Silahkan Absen Masuk terlebih dahulu.");
-        return; // Hentikan proses, kamera tidak akan terbuka
+        return; // Jangan lanjut ke proses absen pulang jika belum absen masuk
       }
     }
 
@@ -92,7 +92,7 @@ export default function Dashboard() {
 
     try {
       const user = auth.currentUser;
-      
+      // --- LOGIKA MENDAPATKAN GPS DAN MENGOMPRES GAMBAR SECARA BERSAMAAN ---
       const getGPS = new Promise((resolve) => {
         if (!navigator.geolocation) return resolve("Tanpa GPS");
         navigator.geolocation.getCurrentPosition(
@@ -111,7 +111,7 @@ export default function Dashboard() {
       await uploadBytes(storageRef, compressedFile);
       const photoURL = await getDownloadURL(storageRef);
 
-      // --- LOGIKA STATUS TERLAMBAT ---
+      // Logika untuk menentukan status keterlambatan hanya untuk Absen Masuk
       let statusTelat = "Tepat Waktu";
       let detailTelat = "-";
       
@@ -135,8 +135,8 @@ export default function Dashboard() {
         waktu: serverTimestamp(),
         foto_url: photoURL,
         lokasi: lokasiAbsen,
-        status_kehadiran: statusTelat, // Simpan status
-        detail_keterlambatan: detailTelat // Simpan detail jam telat
+        status_kehadiran: statusTelat, // Simpan status keterlambatan
+        detail_keterlambatan: detailTelat // Simpan detail keterlambatan (jika ada)
       });
 
       setLoadingMsg(`Sukses! ${absenType} dicatat.`);
@@ -182,15 +182,29 @@ export default function Dashboard() {
 
       <input type="file" accept="image/jpeg, image/png, image/jpg" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
-      <div className="flex flex-col gap-6 z-10">
+      <div className="flex flex-col gap-6 z-10 pb-8">
+        {/* Tombol Absen Masuk */}
         <button onClick={() => handleAbsenClick('Absen Masuk')} disabled={isLoading} className={`w-48 h-48 rounded-full bg-gradient-to-b from-yellow-300 via-orange-300 to-orange-400 flex flex-col items-center justify-center text-white shadow-xl transition-transform ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}>
           <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
           <span className="font-bold tracking-wide">ABSEN<br/>MASUK</span>
         </button>
 
+        {/* Tombol Absen Pulang */}
         <button onClick={() => handleAbsenClick('Absen Pulang')} disabled={isLoading} className={`w-48 h-48 rounded-full bg-gradient-to-b from-pink-400 to-purple-500 flex flex-col items-center justify-center text-white shadow-xl transition-transform ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}>
           <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
           <span className="font-bold tracking-wide">ABSEN<br/>PULANG</span>
+        </button>
+
+        {/* Tombol Visit Masuk */}
+        <button onClick={() => handleAbsenClick('Visit Masuk')} disabled={isLoading} className={`w-48 h-48 rounded-full bg-gradient-to-b from-blue-400 to-indigo-500 flex flex-col items-center justify-center text-white shadow-xl transition-transform ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}>
+          <svg className="w-14 h-14 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path><path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-4m0 0l-2 2m2-2l2 2"></path></svg>
+          <span className="font-bold tracking-wide">VISIT<br/>MASUK</span>
+        </button>
+
+        {/* Tombol Visit Keluar */}
+        <button onClick={() => handleAbsenClick('Visit Keluar')} disabled={isLoading} className={`w-48 h-48 rounded-full bg-gradient-to-b from-[#6ee7b7] to-[#22d3ee] flex flex-col items-center justify-center text-white shadow-xl transition-transform ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}>
+          <svg className="w-14 h-14 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path><path strokeLinecap="round" strokeLinejoin="round" d="M12 12v4m0 0l-2-2m2 2l2-2"></path></svg>
+          <span className="font-bold tracking-wide">VISIT<br/>KELUAR</span>
         </button>
       </div>
 
