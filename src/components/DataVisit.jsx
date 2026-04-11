@@ -8,7 +8,7 @@ import Link from 'next/link';
 
 export default function DataVisit() {
   const [logs, setLogs] = useState([]);
-  const [activeTab, setActiveTab] = useState('Visit Masuk'); // Default tab untuk Visit
+  const [activeTab, setActiveTab] = useState('Visit Masuk');
   const [isLoading, setIsLoading] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const router = useRouter();
@@ -53,13 +53,69 @@ export default function DataVisit() {
     }
   };
 
-  // Filter khusus untuk data "Visit Masuk" dan "Visit Keluar"
+  // --- FUNGSI EXPORT EXCEL/CSV KHUSUS VISIT ---
+  const handleExportCSV = () => {
+    if (logs.length === 0) return alert("Tidak ada data untuk diexport!");
+
+    const groupedData = {};
+
+    logs.forEach(log => {
+      if (log.tipe_absen !== 'Visit Masuk' && log.tipe_absen !== 'Visit Keluar') return;
+
+      const tgl = log.waktuObj.toLocaleDateString('id-ID').replace(/\//g, '-');
+      // Karena 1 hari bisa banyak cabang, kita buat pengelompokkan berdasarkan Tanggal + Cabang
+      const key = `${tgl}_${log.cabang}`; 
+      
+      if (!groupedData[key]) {
+        groupedData[key] = {
+          tanggal: tgl,
+          cabang: log.cabang || "-",
+          masuk: "-",
+          lokasiMasuk: "-",
+          keluar: "-",
+          lokasiKeluar: "-"
+        };
+      }
+
+      if (log.tipe_absen === 'Visit Masuk') {
+        groupedData[key].masuk = log.waktuObj.toLocaleTimeString('id-ID');
+        groupedData[key].lokasiMasuk = log.lokasi || "Tanpa GPS";
+      } else if (log.tipe_absen === 'Visit Keluar') {
+        groupedData[key].keluar = log.waktuObj.toLocaleTimeString('id-ID');
+        groupedData[key].lokasiKeluar = log.lokasi || "Tanpa GPS";
+      }
+    });
+
+    const headers = ["Tanggal", "Cabang/Outlet", "Jam Visit Masuk", "Lokasi Masuk", "Jam Visit Keluar", "Lokasi Keluar"];
+    const csvRows = ['\uFEFF' + headers.join(',')]; 
+
+    Object.values(groupedData).forEach(row => {
+      const csvLine = [
+        row.tanggal,
+        `"${row.cabang}"`,
+        row.masuk,
+        `"${row.lokasiMasuk}"`,
+        row.keluar,
+        `"${row.lokasiKeluar}"`
+      ];
+      csvRows.push(csvLine.join(','));
+    });
+
+    const csvData = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const csvUrl = URL.createObjectURL(csvData);
+    const link = document.createElement('a');
+    link.href = csvUrl;
+    link.download = `Laporan_Visit_Lengkap_${new Date().toLocaleDateString('id-ID')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const filteredLogs = logs.filter(log => log.tipe_absen === activeTab);
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans relative overflow-x-hidden">
+    <div className="min-h-screen bg-gray-50 font-sans relative overflow-x-hidden pb-20">
       
-      {/* Header */}
       <header className="bg-[#050B20] text-white p-4 flex justify-between items-center relative z-20">
         <div className="font-bold text-xl flex items-center gap-2">
           <span className="text-blue-400">⚡</span> AppAbsensi
@@ -86,12 +142,22 @@ export default function DataVisit() {
         </div>
       </div>
 
-      {/* Konten Utama (Tabel) */}
-      <main className="max-w-6xl mx-auto p-6 relative z-10 pb-20">
-        <h1 className="text-3xl font-light text-center my-8 text-gray-800">Data Visit</h1>
+      <main className="max-w-6xl mx-auto p-6 relative z-10">
+        
+        {/* Judul & Tombol Export */}
+        <div className="flex flex-col sm:flex-row justify-between items-center my-8 gap-4">
+          <h1 className="text-3xl font-light text-gray-800">Data Visit</h1>
+          
+          <button 
+            onClick={handleExportCSV}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-sm transition-colors shadow-sm"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Export to Excel
+          </button>
+        </div>
 
         <div className="bg-white shadow-sm border rounded-md overflow-hidden">
-          {/* Tabs Visit */}
           <div className="flex border-b">
             <button 
               onClick={() => setActiveTab('Visit Masuk')}
@@ -111,12 +177,13 @@ export default function DataVisit() {
             {isLoading ? (
               <div className="p-10 text-center text-gray-500">Memuat data...</div>
             ) : (
-              <table className="w-full text-left border-collapse min-w-[600px]">
+              <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead className="bg-[#f8fcfc] border-b border-gray-200">
                   <tr>
                     <th className="p-4 font-semibold text-sm text-gray-700">Tanggal ↓</th>
                     <th className="p-4 font-semibold text-sm text-gray-700">Jam</th>
-                    <th className="p-4 font-semibold text-sm text-gray-700">Lokasi / Keterangan</th>
+                    <th className="p-4 font-semibold text-sm text-gray-700">Cabang / Outlet</th>
+                    <th className="p-4 font-semibold text-sm text-gray-700">Lokasi GPS</th>
                     <th className="p-4 font-semibold text-sm text-gray-700">Bukti Foto</th>
                   </tr>
                 </thead>
@@ -129,17 +196,39 @@ export default function DataVisit() {
                       return (
                         <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="p-4 text-sm text-gray-800">{tgl}</td>
-                          <td className="p-4 text-sm text-gray-800">{jam}</td>
-                          <td className="p-4 text-sm text-gray-800">Diluar kantor</td>
-                          <td className="p-4 text-sm text-blue-600 underline">
-                            <a href={log.foto_url} target="_blank" rel="noopener noreferrer">Lihat Foto</a>
+                          <td className="p-4 text-sm text-gray-800 font-medium">{jam}</td>
+                          <td className="p-4 text-sm text-gray-800 font-semibold">{log.cabang || '-'}</td>
+                          
+                          <td className="p-4 text-sm text-gray-800">
+                            {log.lokasi && !log.lokasi.includes("Tanpa") && !log.lokasi.includes("Gagal") ? (
+                              <a 
+                                href={`https://maps.google.com/?q=${log.lokasi}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-blue-500 hover:underline"
+                              >
+                                Lihat Map
+                              </a>
+                            ) : (
+                              <span className="text-gray-400 text-xs">Tanpa GPS</span>
+                            )}
+                          </td>
+
+                          <td className="p-4 text-sm">
+                            {log.foto_url && log.foto_url !== "-" ? (
+                              <a href={log.foto_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">
+                                Lihat Foto
+                              </a>
+                            ) : (
+                              <span className="text-gray-400 text-xs">Tanpa Foto</span>
+                            )}
                           </td>
                         </tr>
                       );
                     })
                   ) : (
                     <tr>
-                      <td colSpan="4" className="p-8 text-center text-gray-500">
+                      <td colSpan="5" className="p-8 text-center text-gray-500">
                         Belum ada data {activeTab.toLowerCase()}.
                       </td>
                     </tr>
