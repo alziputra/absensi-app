@@ -7,7 +7,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import imageCompression from 'browser-image-compression';
-import { ADMIN_EMAILS } from '@/constants';
+import { ADMIN_EMAILS } from '@/constants'; 
 
 export default function Dashboard() {
   const [time, setTime] = useState("");
@@ -16,27 +16,20 @@ export default function Dashboard() {
   const [absenType, setAbsenType] = useState(""); 
   const [isLoading, setIsLoading] = useState(false); 
   const [loadingMsg, setLoadingMsg] = useState("");
-
-  // STATE UNTUK ADMIN
-  const [isAdmin, setIsAdmin] = useState(false);
   
   const [showVisitModal, setShowVisitModal] = useState(false);
   const [visitType, setVisitType] = useState(""); 
   const [namaCabang, setNamaCabang] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false); 
 
   const fileInputRef = useRef(null);
   const router = useRouter();
 
-  // Cek status login dan apakah user adalah admin
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) router.push('/'); 
       else {
-        // Cek apakah email user termasuk dalam daftar admin
-        if (ADMIN_EMAILS.includes(user.email)) {
-          setIsAdmin(true);
-        }
-
+        if (ADMIN_EMAILS.includes(user.email)) setIsAdmin(true);
         if (user.displayName) setUserName(user.displayName);
         else if (user.email) {
           const namaDariEmail = user.email.split('@')[0];
@@ -47,7 +40,6 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, [router]);
 
-  // Update waktu dan tanggal setiap detik
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -57,10 +49,16 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const checkAbsenMasukHariIni = async (uid) => {
-    const q = query(collection(db, "absensi_logs"), where("userId", "==", uid), where("tipe_absen", "==", "Absen Masuk"));
+  // --- FUNGSI BARU: CEK ABSEN UNIVERSAL (Bisa ngecek Masuk atau Pulang) ---
+  const checkAbsenHariIni = async (uid, tipeAbsen) => {
+    const q = query(
+      collection(db, "absensi_logs"), 
+      where("userId", "==", uid), 
+      where("tipe_absen", "==", tipeAbsen)
+    );
     const snapshot = await getDocs(q);
     const todayStr = new Date().toDateString();
+    
     return snapshot.docs.some(doc => {
       const docDate = doc.data().waktu?.toDate();
       return docDate && docDate.toDateString() === todayStr;
@@ -71,17 +69,38 @@ export default function Dashboard() {
     const user = auth.currentUser;
     if (!user) return alert("Sesi login tidak valid!");
 
-    if (type === 'Absen Pulang') {
-      setIsLoading(true); setLoadingMsg("Mengecek data...");
-      const sudahAbsenMasuk = await checkAbsenMasukHariIni(user.uid);
-      setIsLoading(false); setLoadingMsg("");
-      
-      if (!sudahAbsenMasuk) {
-        alert("Peringatan: Anda belum Absen Masuk hari ini!");
-        return; 
+    setIsLoading(true); 
+    setLoadingMsg(`Mengecek status ${type}...`);
+
+    // 1. CEK ANTI-DOBEL UNTUK ABSEN MASUK
+    if (type === 'Absen Masuk') {
+      const sudahMasuk = await checkAbsenHariIni(user.uid, 'Absen Masuk');
+      if (sudahMasuk) {
+        setIsLoading(false); setLoadingMsg("");
+        return alert("Anda sudah melakukan Absen Masuk hari ini! Tidak perlu absen ganda.");
       }
     }
 
+    // 2. CEK ANTI-DOBEL UNTUK ABSEN PULANG
+    if (type === 'Absen Pulang') {
+      const sudahMasuk = await checkAbsenHariIni(user.uid, 'Absen Masuk');
+      if (!sudahMasuk) {
+        setIsLoading(false); setLoadingMsg("");
+        return alert("Peringatan: Anda belum Absen Masuk hari ini!");
+      }
+
+      const sudahPulang = await checkAbsenHariIni(user.uid, 'Absen Pulang');
+      if (sudahPulang) {
+        setIsLoading(false); setLoadingMsg("");
+        return alert("Anda sudah melakukan Absen Pulang hari ini! Silahkan istirahat.");
+      }
+    }
+
+    // Matikan loading karena pengecekan database sudah selesai
+    setIsLoading(false); 
+    setLoadingMsg("");
+
+    // 3. LOGIKA POPUP VISIT (Tetap dibiarkan tanpa batas)
     if (type.includes('Visit')) {
       setVisitType(type);       
       setNamaCabang("");        
@@ -89,6 +108,7 @@ export default function Dashboard() {
       return;                   
     }
 
+    // Lolos semua pengecekan, buka kamera!
     setAbsenType(type);
     fileInputRef.current.click();
   };
@@ -100,16 +120,12 @@ export default function Dashboard() {
     setShowVisitModal(false); 
     setAbsenType(visitType);  
 
-    if (visitType === 'Visit Masuk') {
-      fileInputRef.current.click(); 
-    } else if (visitType === 'Visit Keluar') {
-      processVisitKeluarTanpaFoto();
-    }
+    if (visitType === 'Visit Masuk') fileInputRef.current.click(); 
+    else if (visitType === 'Visit Keluar') processVisitKeluarTanpaFoto();
   };
 
   const processVisitKeluarTanpaFoto = async () => {
-    setIsLoading(true); 
-    setLoadingMsg(`Memproses Keluar ${namaCabang}...`);
+    setIsLoading(true); setLoadingMsg(`Memproses Keluar ${namaCabang}...`);
     try {
       const user = auth.currentUser;
       const getGPS = new Promise((resolve) => {
@@ -138,10 +154,8 @@ export default function Dashboard() {
       setLoadingMsg(`Sukses! Visit Keluar ${namaCabang} dicatat.`);
       setTimeout(() => { setLoadingMsg(""); setIsLoading(false); }, 2500); 
     } catch (error) {
-      console.error(error);
       alert("Gagal melakukan Visit Keluar.");
-      setIsLoading(false);
-      setLoadingMsg("");
+      setIsLoading(false); setLoadingMsg("");
     }
   };
 
@@ -182,6 +196,8 @@ export default function Dashboard() {
 
       await addDoc(collection(db, "absensi_logs"), {
         userId: user.uid,
+        email: user.email,
+        nama: userName,
         tipe_absen: absenType,
         waktu: serverTimestamp(),
         foto_url: photoURL,
@@ -192,7 +208,6 @@ export default function Dashboard() {
       });
 
       setLoadingMsg(`Sukses! ${absenType} dicatat.`);
-      // Pesan sukses tampil selama 2.5 detik lalu hilang
       setTimeout(() => { setLoadingMsg(""); setIsLoading(false); }, 2500); 
     } catch (error) {
       alert("Gagal absen. Pastikan internet menyala.");
@@ -209,30 +224,22 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-white relative overflow-x-hidden flex flex-col items-center pt-10 pb-28 font-sans">
       
-      {/* --- POPUP LOADING & SUKSES DI TENGAH LAYAR --- */}
+      {/* POPUP LOADING & SUKSES */}
       {loadingMsg && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 bg-black bg-opacity-40 backdrop-blur-sm transition-opacity">
           <div className="bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center max-w-[250px] text-center transform animate-fade-in-up">
-            
-            {/* Jika teks mengandung kata "Sukses", tampilkan centang hijau. Jika tidak, tampilkan spinner biru */}
             {loadingMsg.includes("Sukses") ? (
               <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path>
-                </svg>
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
               </div>
             ) : (
               <div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin mb-4"></div>
             )}
-            
-            <h3 className="text-lg font-bold text-gray-800">
-              {loadingMsg.includes("Sukses") ? "Berhasil!" : "Mohon Tunggu"}
-            </h3>
+            <h3 className="text-lg font-bold text-gray-800">{loadingMsg.includes("Sukses") ? "Berhasil!" : "Mohon Tunggu"}</h3>
             <p className="text-gray-500 text-sm mt-1">{loadingMsg}</p>
           </div>
         </div>
       )}
-      {/* ----------------------------------------------- */}
 
       {/* MODAL INPUT VISIT */}
       {showVisitModal && (
@@ -240,9 +247,7 @@ export default function Dashboard() {
           <div className="fixed inset-0 bg-black bg-opacity-60" onClick={() => setShowVisitModal(false)}></div>
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-[70] animate-fade-in-up">
             <h3 className="text-xl font-bold text-gray-800 mb-2">Form {visitType}</h3>
-            <p className="text-gray-500 text-sm mb-4">
-              Silahkan isi nama Cabang/Outlet yang sedang Anda kunjungi.
-            </p>
+            <p className="text-gray-500 text-sm mb-4">Silahkan isi nama Cabang/Outlet yang sedang Anda kunjungi.</p>
             <form onSubmit={handleVisitSubmit}>
               <input 
                 type="text" 
@@ -250,16 +255,11 @@ export default function Dashboard() {
                 value={namaCabang}
                 onChange={(e) => setNamaCabang(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg p-3 text-black mb-4 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                required
-                autoFocus
+                required autoFocus
               />
               <div className="flex gap-3">
-                <button type="button" onClick={() => setShowVisitModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300">
-                  Batal
-                </button>
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700">
-                  {visitType === 'Visit Masuk' ? 'Buka Kamera' : 'Simpan'}
-                </button>
+                <button type="button" onClick={() => setShowVisitModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300">Batal</button>
+                <button type="submit" className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700">{visitType === 'Visit Masuk' ? 'Buka Kamera' : 'Simpan'}</button>
               </div>
             </form>
           </div>
@@ -271,7 +271,7 @@ export default function Dashboard() {
       <div className="absolute top-40 right-10 w-6 h-6 bg-[#0aa5ff] rounded-full -z-10"></div>
       <div className="absolute top-[28rem] right-[-2rem] w-32 h-32 bg-[#0aa5ff] rounded-full -z-10"></div>
       
-      {/* Header Nama & Jam (Teks loading lama sudah dihapus dari sini) */}
+      {/* Header Nama & Jam */}
       <div className="text-center z-10 mb-8 mt-4">
         <h2 className="text-xl font-semibold text-gray-800">{userName}</h2>
         <h1 className="text-5xl font-bold text-gray-800 my-2">{time}</h1>
@@ -312,7 +312,7 @@ export default function Dashboard() {
           <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path><path strokeLinecap="round" strokeLinejoin="round" d="M9 11l3 3L22 4"></path></svg>
           <span className="text-[10px]">Data Visit</span>
         </Link>
-        {/* TOMBOL ADMIN: HANYA MUNCUL JIKA isAdmin = true */}
+
         {isAdmin && (
           <Link href="/admin" className="flex flex-col items-center text-yellow-400 hover:text-yellow-300 transition">
             <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -322,6 +322,7 @@ export default function Dashboard() {
             <span className="text-[10px] font-bold">Admin Panel</span>
           </Link>
         )}
+
         <button onClick={handleLogout} className="flex flex-col items-center hover:text-red-400 transition">
           <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
           <span className="text-[10px]">Logout</span>
