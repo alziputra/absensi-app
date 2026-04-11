@@ -117,9 +117,9 @@ export default function DataVisit() {
     <div className="min-h-screen bg-gray-50 font-sans relative overflow-x-hidden pb-20">
       
       <header className="bg-[#050B20] text-white p-4 flex justify-between items-center relative z-20">
-        <div className="font-bold text-xl flex items-center gap-2">
+        <Link href="/dashboard" className="font-bold text-xl flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">
           <span className="text-blue-400">⚡</span> AppAbsensi
-        </div>
+        </Link>
         <button onClick={() => setIsMenuOpen(true)} className="bg-white text-black px-3 py-1 rounded cursor-pointer hover:bg-gray-200 transition">
           ☰
         </button>
