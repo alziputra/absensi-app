@@ -16,9 +16,8 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false); 
   const [loadingMsg, setLoadingMsg] = useState("");
   
-  // --- STATE BARU UNTUK POPUP VISIT ---
   const [showVisitModal, setShowVisitModal] = useState(false);
-  const [visitType, setVisitType] = useState(""); // Menyimpan apakah ini Visit Masuk atau Keluar
+  const [visitType, setVisitType] = useState(""); 
   const [namaCabang, setNamaCabang] = useState("");
 
   const fileInputRef = useRef(null);
@@ -57,56 +56,49 @@ export default function Dashboard() {
     });
   };
 
-  // 1. Fungsi Utama saat salah satu dari 4 tombol diklik
   const handleAbsenClick = async (type) => {
     const user = auth.currentUser;
     if (!user) return alert("Sesi login tidak valid!");
 
-    // Cek Absen Pulang
     if (type === 'Absen Pulang') {
       setIsLoading(true); setLoadingMsg("Mengecek data...");
       const sudahAbsenMasuk = await checkAbsenMasukHariIni(user.uid);
       setIsLoading(false); setLoadingMsg("");
+      
       if (!sudahAbsenMasuk) {
         alert("Peringatan: Anda belum Absen Masuk hari ini!");
         return; 
       }
     }
 
-    // LOGIKA POPUP VISIT: Jika tombol yang diklik mengandung kata "Visit"
     if (type.includes('Visit')) {
-      setVisitType(type);       // Simpan jenis visitnya
-      setNamaCabang("");        // Kosongkan kolom input
-      setShowVisitModal(true);  // Tampilkan Popup
-      return;                   // Hentikan proses, biarkan popup bekerja
+      setVisitType(type);       
+      setNamaCabang("");        
+      setShowVisitModal(true);  
+      return;                   
     }
 
-    // Jika Absen Masuk / Pulang Biasa, langsung buka kamera
     setAbsenType(type);
     fileInputRef.current.click();
   };
 
-  // 2. Fungsi saat Popup Visit di-submit
   const handleVisitSubmit = (e) => {
     e.preventDefault();
     if (!namaCabang.trim()) return alert("Nama Cabang / Outlet wajib diisi!");
     
-    setShowVisitModal(false); // Tutup Popup
-    setAbsenType(visitType);  // Set tipe absen agar terbaca di fungsi kamera/keluar
+    setShowVisitModal(false); 
+    setAbsenType(visitType);  
 
     if (visitType === 'Visit Masuk') {
-      // Visit Masuk -> Lanjut buka kamera
       fileInputRef.current.click(); 
     } else if (visitType === 'Visit Keluar') {
-      // Visit Keluar -> Proses tanpa foto
       processVisitKeluarTanpaFoto();
     }
   };
 
-  // 3. Fungsi Khusus Visit Keluar (Ambil GPS tanpa upload foto)
   const processVisitKeluarTanpaFoto = async () => {
     setIsLoading(true); 
-    setLoadingMsg(`Memproses Visit Keluar ${namaCabang}...`);
+    setLoadingMsg(`Memproses Keluar ${namaCabang}...`);
     try {
       const user = auth.currentUser;
       const getGPS = new Promise((resolve) => {
@@ -123,25 +115,23 @@ export default function Dashboard() {
         userId: user.uid,
         tipe_absen: "Visit Keluar",
         waktu: serverTimestamp(),
-        foto_url: "-", // Tidak butuh foto
+        foto_url: "-", 
         lokasi: lokasiAbsen,
-        cabang: namaCabang, // Simpan nama cabang
+        cabang: namaCabang, 
         status_kehadiran: "-",
         detail_keterlambatan: "-"
       });
 
-      setLoadingMsg(`Sukses! Visit Keluar cabang ${namaCabang} dicatat.`);
-      setTimeout(() => setLoadingMsg(""), 3000); 
+      setLoadingMsg(`Sukses! Visit Keluar ${namaCabang} dicatat.`);
+      setTimeout(() => { setLoadingMsg(""); setIsLoading(false); }, 2500); 
     } catch (error) {
       console.error(error);
       alert("Gagal melakukan Visit Keluar.");
-    } finally {
       setIsLoading(false);
       setLoadingMsg("");
     }
   };
 
-  // 4. Fungsi Kamera Bawaan (Untuk Absen Biasa & Visit Masuk)
   const handlePhotoCapture = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -162,7 +152,7 @@ export default function Dashboard() {
       const compressImage = imageCompression(file, options);
       const [lokasiAbsen, compressedFile] = await Promise.all([getGPS, compressImage]);
 
-      setLoadingMsg("Mengunggah data...");
+      setLoadingMsg("Mengunggah foto...");
       const storageRef = ref(storage, `absensi/${user.uid}/${Date.now()}_${compressedFile.name}`);
       await uploadBytes(storageRef, compressedFile);
       const photoURL = await getDownloadURL(storageRef);
@@ -183,17 +173,18 @@ export default function Dashboard() {
         waktu: serverTimestamp(),
         foto_url: photoURL,
         lokasi: lokasiAbsen,
-        cabang: absenType.includes("Visit") ? namaCabang : "-", // Simpan Cabang jika ini Visit Masuk
+        cabang: absenType.includes("Visit") ? namaCabang : "-", 
         status_kehadiran: statusTelat, 
         detail_keterlambatan: detailTelat 
       });
 
       setLoadingMsg(`Sukses! ${absenType} dicatat.`);
-      setTimeout(() => setLoadingMsg(""), 3000); 
+      // Pesan sukses tampil selama 2.5 detik lalu hilang
+      setTimeout(() => { setLoadingMsg(""); setIsLoading(false); }, 2500); 
     } catch (error) {
       alert("Gagal absen. Pastikan internet menyala.");
+      setIsLoading(false); setLoadingMsg("");
     } finally {
-      setIsLoading(false); 
       if (fileInputRef.current) fileInputRef.current.value = ""; 
     }
   };
@@ -205,11 +196,36 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-white relative overflow-x-hidden flex flex-col items-center pt-10 pb-28 font-sans">
       
-      {/* POPUP / MODAL VISIT */}
+      {/* --- POPUP LOADING & SUKSES DI TENGAH LAYAR --- */}
+      {loadingMsg && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 bg-black bg-opacity-40 backdrop-blur-sm transition-opacity">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center max-w-[250px] text-center transform animate-fade-in-up">
+            
+            {/* Jika teks mengandung kata "Sukses", tampilkan centang hijau. Jika tidak, tampilkan spinner biru */}
+            {loadingMsg.includes("Sukses") ? (
+              <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+            ) : (
+              <div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+            )}
+            
+            <h3 className="text-lg font-bold text-gray-800">
+              {loadingMsg.includes("Sukses") ? "Berhasil!" : "Mohon Tunggu"}
+            </h3>
+            <p className="text-gray-500 text-sm mt-1">{loadingMsg}</p>
+          </div>
+        </div>
+      )}
+      {/* ----------------------------------------------- */}
+
+      {/* MODAL INPUT VISIT */}
       {showVisitModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="fixed inset-0 bg-black opacity-60" onClick={() => setShowVisitModal(false)}></div>
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-50 animate-fade-in-up">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
+          <div className="fixed inset-0 bg-black bg-opacity-60" onClick={() => setShowVisitModal(false)}></div>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-[70] animate-fade-in-up">
             <h3 className="text-xl font-bold text-gray-800 mb-2">Form {visitType}</h3>
             <p className="text-gray-500 text-sm mb-4">
               Silahkan isi nama Cabang/Outlet yang sedang Anda kunjungi.
@@ -217,7 +233,7 @@ export default function Dashboard() {
             <form onSubmit={handleVisitSubmit}>
               <input 
                 type="text" 
-                placeholder="Cabang / Outlet" 
+                placeholder="Contoh: Toko Makmur Jaya" 
                 value={namaCabang}
                 onChange={(e) => setNamaCabang(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg p-3 text-black mb-4 focus:ring-2 focus:ring-blue-500 focus:outline-none"
@@ -225,44 +241,33 @@ export default function Dashboard() {
                 autoFocus
               />
               <div className="flex gap-3">
-                <button 
-                  type="button" 
-                  onClick={() => setShowVisitModal(false)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300"
-                >
+                <button type="button" onClick={() => setShowVisitModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300">
                   Batal
                 </button>
-                <button 
-                  type="submit" 
-                  className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center justify-center gap-2"
-                >
-                  {visitType === 'Visit Masuk' ? 'Buka Kamera' : 'Simpan Keluar'}
+                <button type="submit" className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700">
+                  {visitType === 'Visit Masuk' ? 'Buka Kamera' : 'Simpan'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-      {/* --- AKHIR MODAL --- */}
 
+      {/* Dekorasi Background */}
       <div className="absolute top-0 left-0 w-24 h-64 bg-[#0aa5ff] rounded-br-full -z-10"></div>
       <div className="absolute top-40 right-10 w-6 h-6 bg-[#0aa5ff] rounded-full -z-10"></div>
       <div className="absolute top-[28rem] right-[-2rem] w-32 h-32 bg-[#0aa5ff] rounded-full -z-10"></div>
       
+      {/* Header Nama & Jam (Teks loading lama sudah dihapus dari sini) */}
       <div className="text-center z-10 mb-8 mt-4">
         <h2 className="text-xl font-semibold text-gray-800">{userName}</h2>
         <h1 className="text-5xl font-bold text-gray-800 my-2">{time}</h1>
         <p className="text-gray-500 text-sm mb-4">{date}</p>
-        
-        {loadingMsg && (
-          <div className="bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold inline-block animate-pulse shadow-sm">
-            {loadingMsg}
-          </div>
-        )}
       </div>
 
       <input type="file" accept="image/jpeg, image/png, image/jpg" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
+      {/* Tombol Absen & Visit */}
       <div className="flex flex-col gap-6 z-10 pb-8">
         <button onClick={() => handleAbsenClick('Absen Masuk')} disabled={isLoading} className={`w-48 h-48 rounded-full bg-gradient-to-b from-yellow-300 via-orange-300 to-orange-400 flex flex-col items-center justify-center text-white shadow-xl transition-transform ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}>
           <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
