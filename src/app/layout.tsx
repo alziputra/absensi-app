@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Aplikasi Absensi Pegadaian",
   description: "Sistem Absensi & Visit Pegadaian Kanwil",
+  icons: {
+    icon: "/icon.jpeg",
+    shortcut: "/icon.jpeg",
+    apple: "/icon.jpeg",
+  },
 };
 
 export default function RootLayout({
