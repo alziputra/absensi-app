@@ -1,7 +1,7 @@
-// Konfigurasi Database Collections Firestore
 export const DB_COLLECTIONS = {
   ROOT_USERS: "absensi-app", // Root collection
   USER_LOGS: "data",        // Sub-collection under each user document
+  KLAIM_ABSENSI: "klaim_absensi", // Collection for attendance claims
 } as const;
 
 // Batas Jam Kerja & Toleransi

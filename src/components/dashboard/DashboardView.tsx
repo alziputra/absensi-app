@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, FormEvent, ChangeEvent } from "react";
+import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { checkHasAbsenToday, recordAbsensi } from "@/services/absensiService";
 import { compressAndUploadPhoto } from "@/services/storageService";
@@ -395,6 +396,27 @@ export default function DashboardView() {
         onActionClick={handleAbsenClick}
         isLoading={isLoading}
       />
+
+      {/* QUICK LINK KLAIM LUPA ABSEN */}
+      <div className="mt-4 px-6 w-full max-w-sm">
+        <Link
+          href="/klaim-absensi"
+          className="flex items-center justify-between p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-2xl text-blue-900 shadow-sm hover:shadow-md hover:border-blue-300 transition group cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm shadow-sm group-hover:scale-105 transition">
+              📝
+            </div>
+            <div>
+              <div className="font-bold text-xs">Lupa Absensi Hari Ini?</div>
+              <div className="text-[10px] text-blue-600">Ajukan klaim kehadiran manual</div>
+            </div>
+          </div>
+          <span className="text-xs text-blue-600 font-semibold group-hover:translate-x-0.5 transition">
+            Klaim →
+          </span>
+        </Link>
+      </div>
 
       {/* BOTTOM NAVIGATION */}
       <BottomNav isAdmin={isAdmin} />

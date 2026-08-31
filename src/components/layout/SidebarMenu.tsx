@@ -82,6 +82,20 @@ export default function SidebarMenu({
           >
             Data Visit
           </Link>
+          <Link
+            href="/klaim-absensi"
+            onClick={onClose}
+            className={`transition-colors flex items-center justify-between ${
+              currentPath === "/klaim-absensi"
+                ? "text-white font-semibold"
+                : "text-gray-300 hover:text-white"
+            }`}
+          >
+            <span>Klaim Lupa Absen</span>
+            <span className="text-[10px] bg-blue-600/30 border border-blue-500/40 text-blue-400 px-2 py-0.5 rounded-full font-medium">
+              Baru
+            </span>
+          </Link>
         </nav>
         <div className="p-5 mt-auto mb-4">
           <button
