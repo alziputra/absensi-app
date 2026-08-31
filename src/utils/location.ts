@@ -9,8 +9,11 @@ export const getCurrentCoordinates = (): Promise<string> => {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(`${pos.coords.latitude},${pos.coords.longitude}`),
-      () => resolve("Gagal mendapat GPS"),
-      { enableHighAccuracy: true, timeout: 7000, maximumAge: 30000 }
+      (error) => {
+        console.warn("Gagal mendapatkan lokasi GPS:", error);
+        resolve("Gagal mendapat GPS");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   });
 };

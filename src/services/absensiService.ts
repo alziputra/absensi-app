@@ -20,6 +20,16 @@ export const recordAbsensi = async (
   input: AbsensiRecordInput,
   userProfile?: UserProfile | null
 ) => {
+  if (
+    !input.lokasi ||
+    input.lokasi.includes("Tanpa") ||
+    input.lokasi.includes("Gagal")
+  ) {
+    throw new Error(
+      "Lokasi GPS tidak ditemukan atau tidak diizinkan. Absensi wajib menyertakan lokasi GPS yang valid."
+    );
+  }
+
   const userLogsRef = collection(
     db,
     DB_COLLECTIONS.ROOT_USERS,

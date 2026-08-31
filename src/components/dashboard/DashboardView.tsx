@@ -70,6 +70,18 @@ export default function DashboardView() {
 
     try {
       const lokasiAbsen = await getCurrentCoordinates();
+
+      if (!lokasiAbsen || lokasiAbsen.includes("Tanpa") || lokasiAbsen.includes("Gagal")) {
+        setIsLoading(false);
+        setLoadingMsg("");
+        showAlert(
+          "error",
+          "GPS Wajib Aktif",
+          `Gagal mencatat ${type}. Akses lokasi (GPS) tidak ditemukan atau tidak diizinkan. Mohon aktifkan lokasi (GPS) pada perangkat Anda dan beri izin lokasi pada browser.`
+        );
+        return;
+      }
+
       let statusTelat: "Tepat Waktu" | "Terlambat" | "-" = "-";
       let detailTelat = "-";
 
@@ -101,14 +113,14 @@ export default function DashboardView() {
         setLoadingMsg("");
         setIsLoading(false);
       }, 2500);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Gagal mencatat absensi:", error);
       setIsLoading(false);
       setLoadingMsg("");
       showAlert(
         "error",
         "Gagal Absen",
-        `Terjadi kendala saat memproses ${type}. Pastikan koneksi internet aktif.`
+        error.message || `Terjadi kendala saat memproses ${type}. Pastikan koneksi internet dan GPS aktif.`
       );
     }
   };
@@ -227,6 +239,17 @@ export default function DashboardView() {
     try {
       const lokasiAbsen = await getCurrentCoordinates();
 
+      if (!lokasiAbsen || lokasiAbsen.includes("Tanpa") || lokasiAbsen.includes("Gagal")) {
+        setIsLoading(false);
+        setLoadingMsg("");
+        showAlert(
+          "error",
+          "GPS Wajib Aktif",
+          "Gagal mencatat Visit Keluar. Akses lokasi (GPS) tidak ditemukan atau tidak diizinkan. Mohon aktifkan lokasi (GPS) pada perangkat Anda dan beri izin lokasi pada browser."
+        );
+        return;
+      }
+
       await recordAbsensi(
         user.uid,
         {
@@ -245,14 +268,14 @@ export default function DashboardView() {
         setLoadingMsg("");
         setIsLoading(false);
       }, 2500);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setIsLoading(false);
       setLoadingMsg("");
       showAlert(
         "error",
         "Gagal Visit Keluar",
-        "Terjadi kendala saat mencatat visit keluar. Silakan coba kembali."
+        error.message || "Terjadi kendala saat mencatat visit keluar. Silakan coba kembali."
       );
     }
   };
@@ -263,17 +286,24 @@ export default function DashboardView() {
     if (!file || !user || !absenType) return;
 
     setIsLoading(true);
-    setLoadingMsg(`Memproses ${absenType}...`);
+    setLoadingMsg(`Mendeteksi lokasi GPS...`);
 
     try {
-      const getGPSPromise = getCurrentCoordinates();
-      const uploadPhotoPromise = compressAndUploadPhoto(file, user.uid, "absensi");
+      const lokasiAbsen = await getCurrentCoordinates();
 
-      setLoadingMsg("Mengunggah foto & GPS...");
-      const [lokasiAbsen, photoURL] = await Promise.all([
-        getGPSPromise,
-        uploadPhotoPromise,
-      ]);
+      if (!lokasiAbsen || lokasiAbsen.includes("Tanpa") || lokasiAbsen.includes("Gagal")) {
+        setIsLoading(false);
+        setLoadingMsg("");
+        showAlert(
+          "error",
+          "GPS Wajib Aktif",
+          `Gagal memproses ${absenType}. Akses lokasi (GPS) tidak ditemukan atau tidak diizinkan. Mohon aktifkan lokasi (GPS) pada perangkat Anda dan beri izin lokasi pada browser.`
+        );
+        return;
+      }
+
+      setLoadingMsg("Mengunggah foto bukti...");
+      const photoURL = await compressAndUploadPhoto(file, user.uid, "absensi");
 
       await recordAbsensi(
         user.uid,
@@ -293,14 +323,14 @@ export default function DashboardView() {
         setLoadingMsg("");
         setIsLoading(false);
       }, 2500);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setIsLoading(false);
       setLoadingMsg("");
       showAlert(
         "error",
         "Gagal Unggah",
-        "Gagal memproses visit. Pastikan koneksi internet dan izin kamera aktif."
+        error.message || "Gagal memproses visit. Pastikan koneksi internet dan izin kamera aktif."
       );
     } finally {
       if (fileInputRef.current) {
