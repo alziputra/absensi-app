@@ -96,14 +96,13 @@ export default function AdminPanelView() {
 
   const hasFetchedRef = useRef(false);
 
-  // Fetch data segera saat mount — tidak perlu menunggu Firestore sync selesai
+  // Fetch data segera begitu status admin terkonfirmasi
   useEffect(() => {
-    if (!hasFetchedRef.current) {
+    if (isAdmin && !hasFetchedRef.current) {
       hasFetchedRef.current = true;
       fetchAdminData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAdmin]);
 
   // Guard: redirect ke login jika belum login sama sekali
   useEffect(() => {
@@ -116,7 +115,7 @@ export default function AdminPanelView() {
   const isLoggingOutRef = useRef(false);
 
   const fetchAdminData = async (isManualRefresh = false) => {
-    if (isLoggingOutRef.current || !isAdmin) return;
+    if (isLoggingOutRef.current) return;
     if (isManualRefresh) {
       setIsRefreshing(true);
     } else {
