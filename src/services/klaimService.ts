@@ -1,8 +1,8 @@
 import {
   collection,
-  addDoc,
-  getDocs,
   doc,
+  setDoc,
+  getDocs,
   updateDoc,
   query,
   where,
@@ -20,6 +20,8 @@ import { calculateLateStatus } from "@/utils/formatters";
 
 /**
  * Membuat pengajuan klaim lupa absen baru
+ * Path Firestore: `absensi-app/klaim absensi/items/{docId}`
+ * Document ID: NON-AUTO (format: KLAIM_{NIK}_{YYYYMMDD}_{TIPE}_{TIMESTAMP})
  */
 export const createKlaimAbsensi = async (
   userId: string,
@@ -33,10 +35,25 @@ export const createKlaimAbsensi = async (
     throw new Error("Alasan lupa absen wajib diisi secara jelas.");
   }
 
-  const klaimRef = collection(db, DB_COLLECTIONS.KLAIM_ABSENSI);
+  const userIdentifier = userProfile?.nik || userId;
+  const cleanDate = input.tanggal.replace(/-/g, "");
+  const tipeClean = input.tipe_klaim
+    .replace(/\s+/g, "_")
+    .replace(/&/g, "DAN")
+    .toUpperCase();
+  const docId = `KLAIM_${userIdentifier}_${cleanDate}_${tipeClean}_${Date.now()}`;
 
-  const newDoc = await addDoc(klaimRef, {
+  const klaimDocRef = doc(
+    db,
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.KLAIM_DOC,
+    DB_COLLECTIONS.KLAIM_SUB,
+    docId
+  );
+
+  const payload = {
     userId,
+    nik: userIdentifier,
     nama: userProfile?.displayName || "Karyawan",
     email: userProfile?.email || "-",
     kanwil: userProfile?.kanwil || "Kanwil XII - Surabaya",
@@ -52,22 +69,32 @@ export const createKlaimAbsensi = async (
     reviewed_by: "-",
     created_at: serverTimestamp(),
     updated_at: serverTimestamp(),
-  });
+  };
 
-  return newDoc.id;
+  await setDoc(klaimDocRef, payload);
+  return docId;
 };
 
 /**
  * Mengambil riwayat pengajuan klaim oleh 1 user
  */
 export const getUserKlaimList = async (
-  userId: string
+  userId: string,
+  userNik?: string
 ): Promise<KlaimAbsenItem[]> => {
-  const klaimRef = collection(db, DB_COLLECTIONS.KLAIM_ABSENSI);
-  const q = query(klaimRef, where("userId", "==", userId));
-  const snapshot = await getDocs(q);
+  const klaimRef = collection(
+    db,
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.KLAIM_DOC,
+    DB_COLLECTIONS.KLAIM_SUB
+  );
 
-  const list: KlaimAbsenItem[] = snapshot.docs.map((docSnap) => {
+  // Ambil berdasarkan userId
+  const qUserId = query(klaimRef, where("userId", "==", userId));
+  const snapUserId = await getDocs(qUserId);
+  const mapResults = new Map<string, KlaimAbsenItem>();
+
+  snapUserId.docs.forEach((docSnap) => {
     const data = docSnap.data();
     const createdTimestamp =
       data.created_at instanceof Timestamp ? data.created_at : null;
@@ -75,40 +102,122 @@ export const getUserKlaimList = async (
       ? createdTimestamp.toDate()
       : new Date();
 
-    return {
+    mapResults.set(docSnap.id, {
       id: docSnap.id,
       userId: data.userId || userId,
-      nama: data.nama || "User",
+      nik: data.nik || userNik || "-",
+      nama: data.nama || "Karyawan",
       email: data.email || "-",
       kanwil: data.kanwil || "-",
       role: data.role || "-",
       tanggal: data.tanggal,
       tipe_klaim: data.tipe_klaim,
-      jam_masuk: data.jam_masuk || "-",
-      jam_pulang: data.jam_pulang || "-",
-      alasan: data.alasan || "-",
+      jam_masuk: data.jam_masuk,
+      jam_pulang: data.jam_pulang,
+      alasan: data.alasan,
       foto_url: data.foto_url || "-",
       status: data.status || "PENDING",
       catatan_admin: data.catatan_admin || "-",
       reviewed_by: data.reviewed_by || "-",
       created_at: createdTimestamp,
       createdAtObj,
-      updated_at:
-        data.updated_at instanceof Timestamp ? data.updated_at : null,
-    };
+      updated_at: data.updated_at instanceof Timestamp ? data.updated_at : null,
+    });
   });
 
+  // Jika ada userNik, cari juga berdasarkan NIK
+  if (userNik) {
+    const qNik = query(klaimRef, where("nik", "==", userNik));
+    const snapNik = await getDocs(qNik);
+    snapNik.docs.forEach((docSnap) => {
+      if (!mapResults.has(docSnap.id)) {
+        const data = docSnap.data();
+        const createdTimestamp =
+          data.created_at instanceof Timestamp ? data.created_at : null;
+        const createdAtObj = createdTimestamp
+          ? createdTimestamp.toDate()
+          : new Date();
+
+        mapResults.set(docSnap.id, {
+          id: docSnap.id,
+          userId: data.userId || userId,
+          nik: data.nik || userNik,
+          nama: data.nama || "Karyawan",
+          email: data.email || "-",
+          kanwil: data.kanwil || "-",
+          role: data.role || "-",
+          tanggal: data.tanggal,
+          tipe_klaim: data.tipe_klaim,
+          jam_masuk: data.jam_masuk,
+          jam_pulang: data.jam_pulang,
+          alasan: data.alasan,
+          foto_url: data.foto_url || "-",
+          status: data.status || "PENDING",
+          catatan_admin: data.catatan_admin || "-",
+          reviewed_by: data.reviewed_by || "-",
+          created_at: createdTimestamp,
+          createdAtObj,
+          updated_at:
+            data.updated_at instanceof Timestamp ? data.updated_at : null,
+        });
+      }
+    });
+  }
+
+  // Fallback ke koleksi lama jika belum ada
+  if (mapResults.size === 0) {
+    try {
+      const legacyRef = collection(db, DB_COLLECTIONS.KLAIM_ABSENSI);
+      const legacySnap = await getDocs(query(legacyRef, where("userId", "==", userId)));
+      legacySnap.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        const createdTimestamp =
+          data.created_at instanceof Timestamp ? data.created_at : null;
+        mapResults.set(docSnap.id, {
+          id: docSnap.id,
+          userId: data.userId || userId,
+          nik: data.nik || userNik || "-",
+          nama: data.nama || "Karyawan",
+          email: data.email || "-",
+          kanwil: data.kanwil || "-",
+          role: data.role || "-",
+          tanggal: data.tanggal,
+          tipe_klaim: data.tipe_klaim,
+          jam_masuk: data.jam_masuk,
+          jam_pulang: data.jam_pulang,
+          alasan: data.alasan,
+          foto_url: data.foto_url || "-",
+          status: data.status || "PENDING",
+          catatan_admin: data.catatan_admin || "-",
+          reviewed_by: data.reviewed_by || "-",
+          created_at: createdTimestamp,
+          createdAtObj: createdTimestamp ? createdTimestamp.toDate() : new Date(),
+          updated_at: data.updated_at instanceof Timestamp ? data.updated_at : null,
+        });
+      });
+    } catch {
+      // Abaikan jika tidak ada
+    }
+  }
+
+  const list = Array.from(mapResults.values());
   return list.sort((a, b) => b.createdAtObj.getTime() - a.createdAtObj.getTime());
 };
 
 /**
- * Mengambil seluruh pengajuan klaim untuk kebutuhan Admin Panel
+ * Super Admin Mengambil Seluruh Klaim Absensi Karyawan
  */
 export const getAllKlaimListForAdmin = async (): Promise<KlaimAbsenItem[]> => {
-  const klaimRef = collection(db, DB_COLLECTIONS.KLAIM_ABSENSI);
+  const klaimRef = collection(
+    db,
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.KLAIM_DOC,
+    DB_COLLECTIONS.KLAIM_SUB
+  );
   const snapshot = await getDocs(klaimRef);
+  const mapResults = new Map<string, KlaimAbsenItem>();
 
-  const list: KlaimAbsenItem[] = snapshot.docs.map((docSnap) => {
+  snapshot.docs.forEach((docSnap) => {
     const data = docSnap.data();
     const createdTimestamp =
       data.created_at instanceof Timestamp ? data.created_at : null;
@@ -116,58 +225,112 @@ export const getAllKlaimListForAdmin = async (): Promise<KlaimAbsenItem[]> => {
       ? createdTimestamp.toDate()
       : new Date();
 
-    return {
+    mapResults.set(docSnap.id, {
       id: docSnap.id,
       userId: data.userId || "",
-      nama: data.nama || "User",
+      nik: data.nik || "-",
+      nama: data.nama || "Karyawan",
       email: data.email || "-",
       kanwil: data.kanwil || "-",
       role: data.role || "-",
       tanggal: data.tanggal,
       tipe_klaim: data.tipe_klaim,
-      jam_masuk: data.jam_masuk || "-",
-      jam_pulang: data.jam_pulang || "-",
-      alasan: data.alasan || "-",
+      jam_masuk: data.jam_masuk,
+      jam_pulang: data.jam_pulang,
+      alasan: data.alasan,
       foto_url: data.foto_url || "-",
       status: data.status || "PENDING",
       catatan_admin: data.catatan_admin || "-",
       reviewed_by: data.reviewed_by || "-",
       created_at: createdTimestamp,
       createdAtObj,
-      updated_at:
-        data.updated_at instanceof Timestamp ? data.updated_at : null,
-    };
+      updated_at: data.updated_at instanceof Timestamp ? data.updated_at : null,
+    });
   });
 
+  // Gabungkan dari koleksi lama jika ada
+  try {
+    const legacyRef = collection(db, DB_COLLECTIONS.KLAIM_ABSENSI);
+    const legacySnap = await getDocs(legacyRef);
+    legacySnap.docs.forEach((docSnap) => {
+      if (!mapResults.has(docSnap.id)) {
+        const data = docSnap.data();
+        const createdTimestamp =
+          data.created_at instanceof Timestamp ? data.created_at : null;
+        mapResults.set(docSnap.id, {
+          id: docSnap.id,
+          userId: data.userId || "",
+          nik: data.nik || "-",
+          nama: data.nama || "Karyawan",
+          email: data.email || "-",
+          kanwil: data.kanwil || "-",
+          role: data.role || "-",
+          tanggal: data.tanggal,
+          tipe_klaim: data.tipe_klaim,
+          jam_masuk: data.jam_masuk,
+          jam_pulang: data.jam_pulang,
+          alasan: data.alasan,
+          foto_url: data.foto_url || "-",
+          status: data.status || "PENDING",
+          catatan_admin: data.catatan_admin || "-",
+          reviewed_by: data.reviewed_by || "-",
+          created_at: createdTimestamp,
+          createdAtObj: createdTimestamp ? createdTimestamp.toDate() : new Date(),
+          updated_at: data.updated_at instanceof Timestamp ? data.updated_at : null,
+        });
+      }
+    });
+  } catch {
+    // Abaikan
+  }
+
+  const list = Array.from(mapResults.values());
   return list.sort((a, b) => b.createdAtObj.getTime() - a.createdAtObj.getTime());
 };
 
 /**
  * Super Admin Menyetujui Klaim Absensi
  * 1. Update status klaim menjadi APPROVED
- * 2. Menyisipkan rekaman log absensi resmi ke absensi-app/{userId}/data
+ * 2. Menyisipkan rekaman log absensi resmi dengan Document ID NON-AUTO
  */
 export const approveKlaimAbsensi = async (
   klaim: KlaimAbsenItem,
   adminName: string,
   adminNotes?: string
 ): Promise<void> => {
-  // 1. Update dokumen klaim
-  const klaimDocRef = doc(db, DB_COLLECTIONS.KLAIM_ABSENSI, klaim.id);
-  await updateDoc(klaimDocRef, {
-    status: "APPROVED",
-    catatan_admin: adminNotes || "Disetujui oleh Super Admin",
-    reviewed_by: adminName || "Super Admin",
-    updated_at: serverTimestamp(),
-  });
-
-  // 2. Tulis log absensi ke sub-koleksi user
-  const userLogsRef = collection(
+  // 1. Update dokumen klaim di lokasi baru
+  const klaimDocRef = doc(
     db,
-    DB_COLLECTIONS.ROOT_USERS,
-    klaim.userId,
-    DB_COLLECTIONS.USER_LOGS
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.KLAIM_DOC,
+    DB_COLLECTIONS.KLAIM_SUB,
+    klaim.id
   );
+
+  try {
+    await updateDoc(klaimDocRef, {
+      status: "APPROVED",
+      catatan_admin: adminNotes || "Disetujui oleh Super Admin",
+      reviewed_by: adminName || "Super Admin",
+      updated_at: serverTimestamp(),
+    });
+  } catch {
+    // Jika tidak ditemukan di lokasi baru, coba update di lokasi lama
+    try {
+      const legacyDocRef = doc(db, DB_COLLECTIONS.KLAIM_ABSENSI, klaim.id);
+      await updateDoc(legacyDocRef, {
+        status: "APPROVED",
+        catatan_admin: adminNotes || "Disetujui oleh Super Admin",
+        reviewed_by: adminName || "Super Admin",
+        updated_at: serverTimestamp(),
+      });
+    } catch {
+      // Abaikan
+    }
+  }
+
+  // 2. Tulis log absensi ke sub-koleksi user dengan Document ID NON-AUTO
+  const userIdentifier = klaim.nik && klaim.nik !== "-" ? klaim.nik : klaim.userId;
 
   // Parse tanggal & jam klaim untuk membuat Date object yang sesuai
   const [yearStr, monthStr, dayStr] = klaim.tanggal.split("-");
@@ -192,8 +355,20 @@ export const approveKlaimAbsensi = async (
       WORK_HOURS.MAX_CHECKIN_MINUTE
     );
 
-    await addDoc(userLogsRef, {
+    const docIdMasuk = `ABSEN_${userIdentifier}_${klaim.tanggal}_ABSEN_MASUK`;
+    const logDocRefMasuk = doc(
+      db,
+      DB_COLLECTIONS.ROOT,
+      DB_COLLECTIONS.USERS_DOC,
+      DB_COLLECTIONS.USERS_SUB,
+      userIdentifier,
+      DB_COLLECTIONS.USER_LOGS,
+      docIdMasuk
+    );
+
+    await setDoc(logDocRefMasuk, {
       userId: klaim.userId,
+      nik: userIdentifier,
       nama: klaim.nama,
       email: klaim.email,
       kanwil: klaim.kanwil,
@@ -219,8 +394,20 @@ export const approveKlaimAbsensi = async (
       checkoutDate = new Date(year, month, day, parseInt(h, 10), parseInt(m, 10), 0);
     }
 
-    await addDoc(userLogsRef, {
+    const docIdPulang = `ABSEN_${userIdentifier}_${klaim.tanggal}_ABSEN_PULANG`;
+    const logDocRefPulang = doc(
+      db,
+      DB_COLLECTIONS.ROOT,
+      DB_COLLECTIONS.USERS_DOC,
+      DB_COLLECTIONS.USERS_SUB,
+      userIdentifier,
+      DB_COLLECTIONS.USER_LOGS,
+      docIdPulang
+    );
+
+    await setDoc(logDocRefPulang, {
       userId: klaim.userId,
+      nik: userIdentifier,
       nama: klaim.nama,
       email: klaim.email,
       kanwil: klaim.kanwil,
@@ -242,13 +429,35 @@ export const approveKlaimAbsensi = async (
 export const rejectKlaimAbsensi = async (
   klaimId: string,
   adminName: string,
-  alasanPenolakan: string
+  rejectionReason: string
 ): Promise<void> => {
-  const klaimDocRef = doc(db, DB_COLLECTIONS.KLAIM_ABSENSI, klaimId);
-  await updateDoc(klaimDocRef, {
-    status: "REJECTED",
-    catatan_admin: alasanPenolakan.trim() || "Klaim ditolak oleh Super Admin",
-    reviewed_by: adminName || "Super Admin",
-    updated_at: serverTimestamp(),
-  });
+  const klaimDocRef = doc(
+    db,
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.KLAIM_DOC,
+    DB_COLLECTIONS.KLAIM_SUB,
+    klaimId
+  );
+
+  try {
+    await updateDoc(klaimDocRef, {
+      status: "REJECTED",
+      catatan_admin: rejectionReason || "Ditolak oleh Super Admin",
+      reviewed_by: adminName || "Super Admin",
+      updated_at: serverTimestamp(),
+    });
+  } catch {
+    // Fallback jika klaim di lokasi lama
+    try {
+      const legacyDocRef = doc(db, DB_COLLECTIONS.KLAIM_ABSENSI, klaimId);
+      await updateDoc(legacyDocRef, {
+        status: "REJECTED",
+        catatan_admin: rejectionReason || "Ditolak oleh Super Admin",
+        reviewed_by: adminName || "Super Admin",
+        updated_at: serverTimestamp(),
+      });
+    } catch {
+      // Abaikan
+    }
+  }
 };

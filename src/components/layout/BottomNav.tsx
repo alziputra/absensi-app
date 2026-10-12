@@ -2,21 +2,19 @@
 
 import Link from "next/link";
 import { logoutUser } from "@/services/authService";
-import { useRouter } from "next/navigation";
 
 interface BottomNavProps {
   isAdmin?: boolean;
 }
 
 export default function BottomNav({ isAdmin = false }: BottomNavProps) {
-  const router = useRouter();
-
   const handleLogout = async () => {
     try {
       await logoutUser();
-      router.push("/");
     } catch (error) {
       console.error("Logout gagal:", error);
+    } finally {
+      window.location.replace("/");
     }
   };
 

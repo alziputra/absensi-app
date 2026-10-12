@@ -11,7 +11,7 @@ import AlertModal, { AlertType } from "@/components/ui/AlertModal";
 import ExportReportModal from "@/components/absensi/ExportReportModal";
 
 export default function DataAbsensiView() {
-  const { user, profile, isLoading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isLoading: authLoading } = useAuth();
   const [logs, setLogs] = useState<AbsensiLogItem[]>([]);
   const [activeTab, setActiveTab] = useState<"Absen Masuk" | "Absen Pulang">("Absen Masuk");
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -40,14 +40,14 @@ export default function DataAbsensiView() {
 
   useEffect(() => {
     if (user) {
-      loadData(user.uid);
+      loadData(user.uid, profile?.nik);
     }
-  }, [user]);
+  }, [user, profile]);
 
-  const loadData = async (userId: string) => {
+  const loadData = async (userId: string, userNik?: string) => {
     setIsLoading(true);
     try {
-      const data = await getUserAbsensiLogs(userId);
+      const data = await getUserAbsensiLogs(userId, userNik);
       setLogs(data);
     } catch (error) {
       console.error("Gagal mengambil data absensi:", error);
@@ -99,6 +99,7 @@ export default function DataAbsensiView() {
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
         currentPath="/data-absensi"
+        isAdmin={isAdmin}
       />
 
       <main className="max-w-6xl mx-auto p-6 relative z-10">
@@ -147,21 +148,19 @@ export default function DataAbsensiView() {
           <div className="flex border-b border-gray-200">
             <button
               onClick={() => setActiveTab("Absen Masuk")}
-              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${
-                activeTab === "Absen Masuk"
+              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${activeTab === "Absen Masuk"
                   ? "bg-[#050B20] text-white"
                   : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Absensi Masuk
             </button>
             <button
               onClick={() => setActiveTab("Absen Pulang")}
-              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${
-                activeTab === "Absen Pulang"
+              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${activeTab === "Absen Pulang"
                   ? "bg-[#050B20] text-white"
                   : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Absensi Pulang
             </button>
@@ -174,7 +173,7 @@ export default function DataAbsensiView() {
                 Memuat data...
               </div>
             ) : (
-              <table className="w-full text-left border-collapse min-w-[700px]">
+              <table className="w-full text-left border-collapse min-w-175">
                 <thead className="bg-[#f8fcfc] border-b border-gray-200">
                   <tr>
                     <th className="p-4 font-semibold text-sm text-gray-700">Tanggal ↓</th>
@@ -200,11 +199,10 @@ export default function DataAbsensiView() {
                           <td className="p-4 text-sm text-gray-800 font-medium">{jam}</td>
                           <td className="p-4 text-sm text-gray-800">
                             <span
-                              className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                                log.status_kehadiran === "Terlambat"
+                              className={`px-2.5 py-1 rounded-full text-xs font-semibold ${log.status_kehadiran === "Terlambat"
                                   ? "bg-red-100 text-red-600"
                                   : "bg-green-100 text-green-600"
-                              }`}
+                                }`}
                             >
                               {log.status_kehadiran || "-"}
                             </span>

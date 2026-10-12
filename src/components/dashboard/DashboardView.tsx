@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, FormEvent, ChangeEvent } from "react";
+import { useState, useRef, FormEvent, ChangeEvent, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { checkHasAbsenToday, recordAbsensi } from "@/services/absensiService";
 import { compressAndUploadPhoto } from "@/services/storageService";
@@ -17,7 +18,15 @@ import BottomNav from "@/components/layout/BottomNav";
 import AlertModal, { AlertType } from "@/components/ui/AlertModal";
 
 export default function DashboardView() {
+  const router = useRouter();
   const { user, profile, isAdmin, isLoading: authLoading, userName } = useAuth();
+
+  // JIKA USER ADALAH ADMIN, LANGSUNG ARAHKAN KE PANEL ADMIN
+  useEffect(() => {
+    if (!authLoading && isAdmin) {
+      router.replace("/admin");
+    }
+  }, [authLoading, isAdmin, router]);
 
   const [absenType, setAbsenType] = useState<TipeAbsen | "">("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -142,7 +151,7 @@ export default function DashboardView() {
     try {
       // 1. Cek Anti-dobel Absen Masuk
       if (type === "Absen Masuk") {
-        const sudahMasuk = await checkHasAbsenToday(user.uid, "Absen Masuk");
+        const sudahMasuk = await checkHasAbsenToday(user.uid, "Absen Masuk", profile?.nik);
         if (sudahMasuk) {
           setIsLoading(false);
           setLoadingMsg("");
@@ -161,7 +170,7 @@ export default function DashboardView() {
 
       // 2. Cek Anti-dobel Absen Pulang
       if (type === "Absen Pulang") {
-        const sudahMasuk = await checkHasAbsenToday(user.uid, "Absen Masuk");
+        const sudahMasuk = await checkHasAbsenToday(user.uid, "Absen Masuk", profile?.nik);
         if (!sudahMasuk) {
           setIsLoading(false);
           setLoadingMsg("");
@@ -173,7 +182,7 @@ export default function DashboardView() {
           return;
         }
 
-        const sudahPulang = await checkHasAbsenToday(user.uid, "Absen Pulang");
+        const sudahPulang = await checkHasAbsenToday(user.uid, "Absen Pulang", profile?.nik);
         if (sudahPulang) {
           setIsLoading(false);
           setLoadingMsg("");
@@ -340,10 +349,13 @@ export default function DashboardView() {
     }
   };
 
-  if (authLoading) {
+  if (authLoading || isAdmin) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#050B20] text-white flex flex-col items-center justify-center p-6">
+        <div className="w-10 h-10 border-4 border-blue-400/30 border-t-blue-500 rounded-full animate-spin mb-4" />
+        <p className="text-sm font-semibold text-slate-300">
+          {isAdmin ? "Mengarahkan langsung ke Panel Admin..." : "Memuat aplikasi..."}
+        </p>
       </div>
     );
   }
@@ -376,7 +388,7 @@ export default function DashboardView() {
       {/* BACKGROUND DECORATIONS */}
       <div className="absolute top-0 left-0 w-24 h-64 bg-[#0aa5ff] rounded-br-full -z-10" />
       <div className="absolute top-40 right-10 w-6 h-6 bg-[#0aa5ff] rounded-full -z-10" />
-      <div className="absolute top-[28rem] right-[-2rem] w-32 h-32 bg-[#0aa5ff] rounded-full -z-10" />
+      <div className="absolute top-112 -right-8 w-32 h-32 bg-[#0aa5ff] rounded-full -z-10" />
 
       {/* CLOCK & GREETINGS */}
       <HeaderClock userName={userName} />
@@ -401,7 +413,7 @@ export default function DashboardView() {
       <div className="mt-4 px-6 w-full max-w-sm">
         <Link
           href="/klaim-absensi"
-          className="flex items-center justify-between p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-2xl text-blue-900 shadow-sm hover:shadow-md hover:border-blue-300 transition group cursor-pointer"
+          className="flex items-center justify-between p-3.5 bg-linear-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-2xl text-blue-900 shadow-sm hover:shadow-md hover:border-blue-300 transition group cursor-pointer"
         >
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm shadow-sm group-hover:scale-105 transition">

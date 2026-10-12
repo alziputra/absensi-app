@@ -2,27 +2,28 @@
 
 import Link from "next/link";
 import { logoutUser } from "@/services/authService";
-import { useRouter } from "next/navigation";
 
 interface SidebarMenuProps {
   isOpen: boolean;
   onClose: () => void;
   currentPath?: string;
+  isAdmin?: boolean;
 }
 
 export default function SidebarMenu({
   isOpen,
   onClose,
   currentPath = "",
+  isAdmin = false,
 }: SidebarMenuProps) {
-  const router = useRouter();
 
   const handleLogout = async () => {
     try {
       await logoutUser();
-      router.push("/");
     } catch (error) {
       console.error("Gagal logout:", error);
+    } finally {
+      window.location.replace("/");
     }
   };
 
@@ -96,6 +97,22 @@ export default function SidebarMenu({
               Baru
             </span>
           </Link>
+          {isAdmin && (
+            <Link
+              href="/admin"
+              onClick={onClose}
+              className={`transition-colors flex items-center justify-between text-amber-400 hover:text-amber-300 ${
+                currentPath === "/admin"
+                  ? "font-semibold"
+                  : ""
+              }`}
+            >
+              <span>Admin Panel</span>
+              <span className="text-[10px] bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2 py-0.5 rounded-full font-medium">
+                Admin
+              </span>
+            </Link>
+          )}
         </nav>
         <div className="p-5 mt-auto mb-4">
           <button

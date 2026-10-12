@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -10,6 +10,9 @@ import {
   getAllUserProfiles,
   approveAndSendPasswordReset,
   updateUserRole,
+  adminCreateUser,
+  adminDeleteUser,
+  adminResetUserPasswordStatus,
 } from "@/services/authService";
 import { getAllEmployeeLogsForAdmin } from "@/services/reportService";
 import {
@@ -18,7 +21,7 @@ import {
   rejectKlaimAbsensi,
 } from "@/services/klaimService";
 import { formatDateID, formatTimeID } from "@/utils/formatters";
-import { KANWIL_OPTIONS } from "@/config/constants";
+import { KANWIL_OPTIONS, JABATAN_OPTIONS } from "@/config/constants";
 import { AbsensiLogItem, UserProfile, TipeAbsen, KlaimAbsenItem } from "@/types";
 import AlertModal, { AlertType } from "@/components/ui/AlertModal";
 import ExportReportModal from "@/components/absensi/ExportReportModal";
@@ -28,7 +31,9 @@ export default function AdminPanelView() {
   const [logs, setLogs] = useState<AbsensiLogItem[]>([]);
   const [userProfiles, setUserProfiles] = useState<UserProfile[]>([]);
   const [klaimList, setKlaimList] = useState<KlaimAbsenItem[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const router = useRouter();
 
@@ -57,6 +62,17 @@ export default function AdminPanelView() {
   const [alasanPenolakan, setAlasanPenolakan] = useState<string>("");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+  // Tambah Karyawan Modal State
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState<boolean>(false);
+  const [newNik, setNewNik] = useState<string>("");
+  const [newNama, setNewNama] = useState<string>("");
+  const [newEmail, setNewEmail] = useState<string>("");
+  const [newKanwil, setNewKanwil] = useState<string>(KANWIL_OPTIONS[0]);
+  const [newRole, setNewRole] = useState<string>("user");
+  const [newJabatan, setNewJabatan] = useState<string>(JABATAN_OPTIONS[3] || "MS KANWIL");
+  const [filterJabatan, setFilterJabatan] = useState<string>("ALL");
+  const [isCreatingUser, setIsCreatingUser] = useState<boolean>(false);
+
   // Alert Modal State
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
@@ -78,26 +94,46 @@ export default function AdminPanelView() {
     setAlertConfig((prev) => ({ ...prev, isOpen: false }));
   };
 
-  useEffect(() => {
-    if (!authLoading && user) {
-      if (isAdmin) {
-        fetchAdminData();
-      }
-    }
-  }, [authLoading, user, isAdmin]);
+  const hasFetchedRef = useRef(false);
 
-  const fetchAdminData = async () => {
-    setIsLoading(true);
+  // Fetch data segera saat mount — tidak perlu menunggu Firestore sync selesai
+  useEffect(() => {
+    if (!hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchAdminData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Guard: redirect ke login jika belum login sama sekali
+  useEffect(() => {
+    if (isLoggingOut) return;
+    if (!authLoading && !user) {
+      window.location.replace("/");
+    }
+  }, [authLoading, user, isLoggingOut]);
+
+  const isLoggingOutRef = useRef(false);
+
+  const fetchAdminData = async (isManualRefresh = false) => {
+    if (isLoggingOutRef.current || !isAdmin) return;
+    if (isManualRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
     try {
       const [logsData, usersData, klaimsData] = await Promise.all([
         getAllEmployeeLogsForAdmin(),
         getAllUserProfiles(),
         getAllKlaimListForAdmin(),
       ]);
+      if (isLoggingOutRef.current) return;
       setLogs(logsData);
       setUserProfiles(usersData);
       setKlaimList(klaimsData);
     } catch (error) {
+      if (isLoggingOutRef.current) return;
       console.error("Gagal mengambil data admin:", error);
       showAlert(
         "error",
@@ -105,16 +141,25 @@ export default function AdminPanelView() {
         "Terjadi kendala saat menghubungkan ke database server."
       );
     } finally {
-      setIsLoading(false);
+      if (!isLoggingOutRef.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
   };
 
   const handleLogout = async () => {
+    isLoggingOutRef.current = true;
+    setIsLoggingOut(true);
+    closeAlert();
+    console.log("🚪 Keluar diklik — menghapus sesi...");
     try {
       await logoutUser();
-      router.push("/");
+      console.log("✅ Sesi dihapus, redirect ke /");
     } catch (error) {
       console.error("Gagal logout:", error);
+    } finally {
+      window.location.replace("/");
     }
   };
 
@@ -195,14 +240,21 @@ export default function AdminPanelView() {
   const filteredUsers = useMemo(() => {
     return userProfiles.filter((u) => {
       const searchLower = searchTerm.toLowerCase();
-      return (
+      const matchSearch =
+        (u.nik || "").toLowerCase().includes(searchLower) ||
         (u.displayName || "").toLowerCase().includes(searchLower) ||
         (u.email || "").toLowerCase().includes(searchLower) ||
         (u.kanwil || "").toLowerCase().includes(searchLower) ||
-        (u.role || "").toLowerCase().includes(searchLower)
-      );
+        (u.jabatan || "").toLowerCase().includes(searchLower) ||
+        (u.role || "").toLowerCase().includes(searchLower);
+
+      const matchJabatan =
+        filterJabatan === "ALL" ||
+        (u.jabatan || "").toUpperCase().trim() === filterJabatan.toUpperCase().trim();
+
+      return matchSearch && matchJabatan;
     });
-  }, [userProfiles, searchTerm]);
+  }, [userProfiles, searchTerm, filterJabatan]);
 
   // --- FILTER KLAIM ABSENSI ---
   const filteredKlaim = useMemo(() => {
@@ -383,24 +435,26 @@ export default function AdminPanelView() {
     }
 
     try {
-      await approveAndSendPasswordReset(uid, userEmail.trim());
-      
+      await approveAndSendPasswordReset(uid);
+
       // Update local state agar status resetRequested langsung hilang dari tabel
       setUserProfiles((prev) =>
-        prev.map((u) => (u.uid === uid ? { ...u, resetRequested: false } : u))
+        prev.map((u) =>
+          u.uid === uid ? { ...u, resetRequested: false, passwordSet: false, password: "" } : u
+        )
       );
 
       showAlert(
         "success",
-        "Tautan Reset Terkirim!",
-        `Permintaan reset disetujui! Tautan pembuatan kata sandi baru telah berhasil dikirimkan ke email: ${userEmail} (${userName || "Karyawan"}).\n\nKaryawan dapat membuka emailnya untuk memperbarui kata sandi.`
+        "Reset Password Disetujui!",
+        `Status aktivasi ${userName || "Karyawan"} berhasil direset.\n\nKaryawan kini dapat masuk ke halaman Login → tab Register, memasukkan NIK-nya, dan membuat password baru. Data absensi tetap aman.`
       );
     } catch (error: any) {
-      console.error("Gagal mengirim reset password:", error);
+      console.error("Gagal reset password:", error);
       showAlert(
         "error",
-        "Gagal Mengirim Email",
-        `Terjadi kendala: ${error.message || "Pastikan email valid."}`
+        "Gagal Reset Password",
+        `Terjadi kendala: ${error.message || "Gagal memperbarui database."}`
       );
     }
   };
@@ -408,7 +462,7 @@ export default function AdminPanelView() {
   // --- UBAH ROLE USER (admin / user) ---
   const handleRoleChange = async (
     uid: string,
-    newRole: "admin" | "user",
+    newRole: "admin" | "user" | string,
     userName: string
   ) => {
     try {
@@ -430,6 +484,128 @@ export default function AdminPanelView() {
       );
     }
   };
+
+  // --- TAMBAH DATA KARYAWAN BARU ---
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNik.trim() || !newNama.trim() || !newEmail.trim()) {
+      showAlert(
+        "warning",
+        "Data Belum Lengkap",
+        "NIK, Nama Lengkap, dan Email resmi wajib diisi."
+      );
+      return;
+    }
+
+    setIsCreatingUser(true);
+    try {
+      const created = await adminCreateUser({
+        nik: newNik.trim(),
+        displayName: newNama.trim(),
+        email: newEmail.trim(),
+        kanwil: newKanwil,
+        role: newRole,
+        jabatan: newJabatan,
+      });
+
+      setIsAddUserModalOpen(false);
+      setNewNik("");
+      setNewNama("");
+      setNewEmail("");
+      showAlert(
+        "success",
+        "Karyawan Berhasil Ditambahkan!",
+        `Data ${created.displayName} (NIK: ${created.nik}) berhasil disimpan di database.\n\nKaryawan kini dapat membuka halaman login, memasukkan NIK tersebut, dan langsung membuat password baru untuk aktivasi akun.`
+      );
+      await fetchAdminData();
+    } catch (err: any) {
+      console.error("Gagal menambahkan karyawan:", err);
+      showAlert(
+        "error",
+        "Gagal Menambahkan Karyawan",
+        err.message || "Terjadi kesalahan saat menyimpan data."
+      );
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
+  // --- RESET STATUS PASSWORD (IZINKAN BUAT PASSWORD ULANG) ---
+  const handleResetPasswordStatus = async (nik: string, nama: string) => {
+    if (
+      !confirm(
+        `Apakah Anda ingin mereset status aktivasi ${nama} (${nik})?\n\nKaryawan akan dapat membuat password baru kembali seperti saat pertama kali didaftarkan.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await adminResetUserPasswordStatus(nik);
+      showAlert(
+        "success",
+        "Status Berhasil Direset",
+        `Karyawan ${nama} (${nik}) kini dapat menginputkan password baru kembali saat login.`
+      );
+      await fetchAdminData();
+    } catch (err: any) {
+      console.error("Gagal reset status:", err);
+      showAlert("error", "Gagal Reset Status", err.message || "Terjadi kendala.");
+    }
+  };
+
+  // --- HAPUS DATA KARYAWAN ---
+  const handleDeleteUser = async (nik: string, nama: string) => {
+    if (
+      !confirm(
+        `PERINGATAN: Apakah Anda yakin ingin menghapus data karyawan ${nama} (${nik}) secara permanen?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await adminDeleteUser(nik);
+      showAlert(
+        "info",
+        "Karyawan Dihapus",
+        `Data karyawan ${nama} (${nik}) telah dihapus dari sistem.`
+      );
+      await fetchAdminData();
+    } catch (err: any) {
+      console.error("Gagal menghapus karyawan:", err);
+      showAlert("error", "Gagal Menghapus Karyawan", err.message || "Terjadi kendala.");
+    }
+  };
+  // Tampilkan Popup Lucu "Eits" jika user bukan admin yang mencoba akses halaman ini
+  if (!isLoggingOut && !authLoading && !isAdmin && user !== null) {
+    return (
+      <div className="min-h-screen bg-[#0F172A] flex items-center justify-center px-4 relative overflow-hidden">
+        {/* Ambient glow effect */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-rose-600/15 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 bg-slate-900 border border-red-500/40 rounded-3xl shadow-2xl p-8 text-center max-w-sm backdrop-blur-xl">
+          <div className="text-6xl mb-4 animate-bounce">👮‍♂️🛑</div>
+          <h3 className="text-2xl font-black text-rose-500 mb-2">
+            Eits, Mau Kemana Bos? ✋😂
+          </h3>
+          <p className="text-slate-300 font-medium text-sm mb-6 leading-relaxed">
+            Nakal yeee!! Lu bukan Super Admin, jangan coba-coba ngintip sembarangan bro!
+            <br />
+            <span className="text-amber-400 font-semibold block mt-2">
+              Sungkem dulu ke Bang Alzi kalau mau minta akses! ☕😎
+            </span>
+          </p>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="w-full bg-linear-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white py-3.5 rounded-2xl font-bold transition-all cursor-pointer shadow-lg shadow-rose-600/30 active:scale-95 text-sm"
+          >
+            Balik ke Jalan yang Benar 🏃‍♂️💨
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0F172A] text-slate-100 font-sans pb-20">
@@ -453,7 +629,7 @@ export default function AdminPanelView() {
       {/* PHOTO PREVIEW MODAL */}
       {previewPhotoUrl && (
         <div
-          className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          className="fixed inset-0 z-150 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
           onClick={() => setPreviewPhotoUrl(null)}
         >
           <div
@@ -494,7 +670,7 @@ export default function AdminPanelView() {
 
       {/* REJECT KLAIM MODAL */}
       {isRejectModalOpen && selectedKlaimForReject && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div className="fixed inset-0 z-160 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-fade-in-up">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 text-lg">
@@ -544,36 +720,163 @@ export default function AdminPanelView() {
         </div>
       )}
 
-      {/* UNAUTHORIZED ACCESS MODAL */}
-      {!authLoading && !isAdmin && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center px-4 bg-black/85 backdrop-blur-md">
-          <div className="bg-slate-900 border border-red-500/40 rounded-3xl shadow-2xl p-8 text-center max-w-sm animate-bounce">
-            <div className="text-6xl mb-4">👮‍♂️🛑</div>
-            <h3 className="text-2xl font-black text-rose-500 mb-2">
-              Eits, Mau Kemana Bos? ✋😂
-            </h3>
-            <p className="text-slate-300 font-medium text-sm mb-6 leading-relaxed">
-              Nakal yeee!! Lu bukan Super Admin, jangan coba-coba ngintip sembarangan bro! 
-              <br />
-              <span className="text-amber-400 font-semibold block mt-2">
-                Sungkem dulu ke Bang Alzi kalau mau minta akses! ☕😎
-              </span>
-            </p>
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="w-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white py-3.5 rounded-2xl font-bold transition-all cursor-pointer shadow-lg shadow-rose-600/30 active:scale-95 text-sm"
-            >
-              Balik ke Jalan yang Benar 🏃‍♂️💨
-            </button>
+      {/* MODAL TAMBAH KARYAWAN BARU */}
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 z-160 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl relative animate-fade-in-up">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 text-lg">
+                  👤➕
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">
+                    Tambah Data Karyawan
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Daftarkan NIK & Email karyawan baru
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUser} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nomor Induk Karyawan (NIK)*
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: 12345678"
+                  value={newNik}
+                  onChange={(e) => setNewNik(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  NIK akan menjadi ID unik karyawan dan ID Dokumen Firestore (Non-Auto).
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nama Lengkap Karyawan*
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Budi Santoso"
+                  value={newNama}
+                  onChange={(e) => setNewNama(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Email Resmi Karyawan*
+                </label>
+                <input
+                  type="email"
+                  placeholder="Contoh: budi@pegadaian.co.id"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Digunakan untuk autentikasi dan reset password.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Kantor Wilayah*
+                  </label>
+                  <select
+                    value={newKanwil}
+                    onChange={(e) => setNewKanwil(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    {KANWIL_OPTIONS.map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Role Sistem*
+                  </label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="user">User / Karyawan</option>
+                    <option value="admin">Super Admin</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Jabatan / Unit Kerja*
+                </label>
+                <select
+                  value={newJabatan}
+                  onChange={(e) => setNewJabatan(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer font-medium"
+                >
+                  {JABATAN_OPTIONS.map((jab) => (
+                    <option key={jab} value={jab}>
+                      {jab}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-[11px] text-blue-300 leading-relaxed">
+                ℹ️ Karyawan yang didaftarkan akan otomatis berstatus <strong>Belum Aktivasi</strong>. Saat login pertama kali menggunakan NIK ini, karyawan akan langsung membuat password baru.
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddUserModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingUser}
+                  className="px-5 py-2.5 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold transition cursor-pointer shadow-lg shadow-blue-500/25 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isCreatingUser ? "Menyimpan..." : "Simpan & Daftarkan Karyawan"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
+
+
 
       {/* TOP HEADER */}
       <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 px-6 py-4">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <div className="w-10 h-10 rounded-2xl bg-linear-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
               <span className="text-xl">🛡️</span>
             </div>
             <div>
@@ -588,27 +891,21 @@ export default function AdminPanelView() {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={fetchAdminData}
-              disabled={isLoading}
-              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              onClick={() => fetchAdminData(true)}
+              disabled={isRefreshing}
+              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-70"
               title="Muat ulang data terbaru"
             >
-              <span className={isLoading ? "animate-spin" : ""}>🔄</span>
-              <span>Segarkan</span>
+              <span className={isRefreshing ? "animate-spin inline-block" : "inline-block"}>🔄</span>
+              <span>{isRefreshing ? "Memuat..." : "Segarkan"}</span>
             </button>
-
-            <Link
-              href="/dashboard"
-              className="text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-3.5 py-2 rounded-xl font-medium transition"
-            >
-              Dashboard Pegawai →
-            </Link>
 
             <button
               onClick={handleLogout}
-              className="text-xs bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 px-3.5 py-2 rounded-xl font-medium transition cursor-pointer"
+              disabled={isLoggingOut}
+              className="text-xs bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 px-3.5 py-2 rounded-xl font-medium transition cursor-pointer disabled:opacity-50"
             >
-              Keluar
+              {isLoggingOut ? "Keluar..." : "Keluar"}
             </button>
           </div>
         </div>
@@ -678,11 +975,10 @@ export default function AdminPanelView() {
         <div className="flex items-center gap-3 border-b border-slate-800 mb-6 pb-2 overflow-x-auto">
           <button
             onClick={() => setActiveTab("logs")}
-            className={`px-5 py-2.5 rounded-2xl text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-              activeTab === "logs"
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
-                : "text-slate-400 hover:text-white hover:bg-slate-800"
-            }`}
+            className={`px-5 py-2.5 rounded-2xl text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeTab === "logs"
+              ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
           >
             <span>📋</span>
             <span>Rekap Aktivitas Absensi ({filteredLogs.length})</span>
@@ -690,11 +986,10 @@ export default function AdminPanelView() {
 
           <button
             onClick={() => setActiveTab("klaim")}
-            className={`px-5 py-2.5 rounded-2xl text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-              activeTab === "klaim"
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
-                : "text-slate-400 hover:text-white hover:bg-slate-800"
-            }`}
+            className={`px-5 py-2.5 rounded-2xl text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeTab === "klaim"
+              ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
           >
             <span>📝</span>
             <span>Klaim Lupa Absen ({filteredKlaim.length})</span>
@@ -707,11 +1002,10 @@ export default function AdminPanelView() {
 
           <button
             onClick={() => setActiveTab("users")}
-            className={`px-5 py-2.5 rounded-2xl text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-              activeTab === "users"
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
-                : "text-slate-400 hover:text-white hover:bg-slate-800"
-            }`}
+            className={`px-5 py-2.5 rounded-2xl text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeTab === "users"
+              ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
           >
             <span>👥</span>
             <span>Direktori Karyawan ({filteredUsers.length})</span>
@@ -842,9 +1136,17 @@ export default function AdminPanelView() {
             </div>
 
             {/* TABLE CONTAINER */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative">
+              {isRefreshing && (
+                <div className="absolute inset-0 z-10 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center rounded-3xl">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+                    <p className="text-slate-400 text-xs">Menyegarkan data...</p>
+                  </div>
+                </div>
+              )}
               <div className="overflow-x-auto">
-                {isLoading || authLoading ? (
+                {isLoading ? (
                   <div className="p-20 text-center flex flex-col items-center">
                     <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4" />
                     <p className="text-slate-400 text-sm font-medium">
@@ -852,7 +1154,7 @@ export default function AdminPanelView() {
                     </p>
                   </div>
                 ) : (
-                  <table className="w-full text-left border-collapse min-w-[950px]">
+                  <table className="w-full text-left border-collapse min-w-237.5">
                     <thead className="bg-slate-950/60 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider font-semibold">
                       <tr>
                         <th className="p-4 pl-6">Waktu & Tanggal ↓</th>
@@ -908,11 +1210,10 @@ export default function AdminPanelView() {
                                 {log.status_kehadiran &&
                                   log.status_kehadiran !== "-" && (
                                     <span
-                                      className={`inline-block mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                                        log.status_kehadiran === "Terlambat"
-                                          ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-                                          : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                      }`}
+                                      className={`inline-block mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${log.status_kehadiran === "Terlambat"
+                                        ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                        : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                        }`}
                                     >
                                       {log.status_kehadiran}
                                       {log.detail_keterlambatan &&
@@ -931,8 +1232,8 @@ export default function AdminPanelView() {
                                   </div>
                                 )}
                                 {log.lokasi &&
-                                !log.lokasi.includes("Tanpa") &&
-                                !log.lokasi.includes("Gagal") ? (
+                                  !log.lokasi.includes("Tanpa") &&
+                                  !log.lokasi.includes("Gagal") ? (
                                   <a
                                     href={`https://maps.google.com/?q=${log.lokasi}`}
                                     target="_blank"
@@ -1033,11 +1334,10 @@ export default function AdminPanelView() {
                       setCurrentPage((prev) => Math.max(prev - 1, 1))
                     }
                     disabled={currentPage === 1}
-                    className={`px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer ${
-                      currentPage === 1
-                        ? "opacity-40 cursor-not-allowed"
-                        : "bg-slate-800 hover:bg-slate-700 text-white"
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer ${currentPage === 1
+                      ? "opacity-40 cursor-not-allowed"
+                      : "bg-slate-800 hover:bg-slate-700 text-white"
+                      }`}
                   >
                     ← Sebelumnya
                   </button>
@@ -1053,11 +1353,10 @@ export default function AdminPanelView() {
                       )
                     }
                     disabled={currentPage === totalPages || totalPages === 0}
-                    className={`px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer ${
-                      currentPage === totalPages || totalPages === 0
-                        ? "opacity-40 cursor-not-allowed"
-                        : "bg-slate-800 hover:bg-slate-700 text-white"
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer ${currentPage === totalPages || totalPages === 0
+                      ? "opacity-40 cursor-not-allowed"
+                      : "bg-slate-800 hover:bg-slate-700 text-white"
+                      }`}
                   >
                     Selanjutnya →
                   </button>
@@ -1070,6 +1369,44 @@ export default function AdminPanelView() {
         {/* TAB 2: DIREKTORI KARYAWAN */}
         {activeTab === "users" && (
           <div className="space-y-4">
+            {/* KPI STATS KARYAWAN */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-md">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold">
+                  👥
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">Total Karyawan</div>
+                  <div className="text-lg font-black text-white">{userProfiles.length}</div>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-md">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
+                  ✓
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">Akun Aktif (Ber-Password)</div>
+                  <div className="text-lg font-black text-emerald-400">
+                    {userProfiles.filter((u) => u.passwordSet).length}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-md">
+                <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
+                  ⏳
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">Belum Aktivasi Akun</div>
+                  <div className="text-lg font-black text-amber-400">
+                    {userProfiles.filter((u) => !u.passwordSet).length}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* TOOLBAR CARI & TAMBAH */}
             <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col sm:flex-row justify-between items-center gap-4">
               <div className="flex-1 w-full relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
@@ -1077,30 +1414,81 @@ export default function AdminPanelView() {
                 </span>
                 <input
                   type="text"
-                  placeholder="Cari nama, email, kanwil, atau role karyawan..."
+                  placeholder="Cari NIK, nama karyawan, email, kanwil, atau role..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
                 />
               </div>
-              <div className="text-xs text-slate-400 whitespace-nowrap">
-                Total Karyawan Terdaftar:{" "}
-                <strong className="text-white text-sm">
-                  {filteredUsers.length}
-                </strong>
+
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsAddUserModalOpen(true)}
+                  className="bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold px-4 py-2.5 rounded-2xl text-xs transition cursor-pointer shadow-lg shadow-blue-500/25 flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <span>➕</span>
+                  <span>Tambah Karyawan</span>
+                </button>
               </div>
+            </div>
+
+            {/* TABS FILTER JABATAN / UNIT (SESUAI SHEET UNIT KERJA) */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-3 py-1 flex items-center gap-1 overflow-x-auto shadow-md">
+              <button
+                type="button"
+                onClick={() => setFilterJabatan("ALL")}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${filterJabatan === "ALL"
+                  ? "bg-slate-800 text-emerald-400 border-b-2 border-emerald-400 shadow-sm"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/40"
+                  }`}
+              >
+                <span>🏢</span>
+                <span>SEMUA UNIT</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-300">
+                  {userProfiles.length}
+                </span>
+              </button>
+              {JABATAN_OPTIONS.map((jab) => {
+                const count = userProfiles.filter(
+                  (u) => (u.jabatan || "").toUpperCase().trim() === jab.toUpperCase().trim()
+                ).length;
+                const isActive = filterJabatan === jab;
+                return (
+                  <button
+                    key={jab}
+                    type="button"
+                    onClick={() => setFilterJabatan(jab)}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${isActive
+                      ? "bg-slate-800 text-emerald-400 border-b-2 border-emerald-400 shadow-sm"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/40"
+                      }`}
+                  >
+                    <span>{jab}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full ${isActive
+                        ? "bg-emerald-500/20 text-emerald-300"
+                        : "bg-slate-800 text-slate-400"
+                        }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[750px]">
+                <table className="w-full text-left border-collapse min-w-225">
                   <thead className="bg-slate-950/60 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider font-semibold">
                     <tr>
-                      <th className="p-4 pl-6">Nama Karyawan</th>
-                      <th className="p-4">Email</th>
-                      <th className="p-4">Kantor Wilayah (Kanwil)</th>
-                      <th className="p-4">Role / Jabatan</th>
-                      <th className="p-4 text-center">UID User</th>
+                      <th className="p-4 pl-6">NIK Karyawan</th>
+                      <th className="p-4">Nama Lengkap</th>
+                      <th className="p-4">Email Resmi</th>
+                      <th className="p-4">Kantor Wilayah</th>
+                      <th className="p-4">Role Sistem</th>
+                      <th className="p-4 text-center">Status Akun</th>
                       <th className="p-4 text-center pr-6">Aksi Kelola</th>
                     </tr>
                   </thead>
@@ -1108,57 +1496,73 @@ export default function AdminPanelView() {
                     {filteredUsers.length > 0 ? (
                       filteredUsers.map((u) => {
                         const isRequested = Boolean(u.resetRequested);
+                        const userNik = u.nik || u.uid;
 
                         return (
                           <tr
-                            key={u.uid}
-                            className={`transition-colors ${
-                              isRequested
-                                ? "bg-amber-500/10 border-l-4 border-amber-500 hover:bg-amber-500/15"
-                                : "hover:bg-slate-800/40"
-                            }`}
+                            key={userNik}
+                            className={`transition-colors ${isRequested
+                              ? "bg-amber-500/10 border-l-4 border-amber-500 hover:bg-amber-500/15"
+                              : "hover:bg-slate-800/40"
+                              }`}
                           >
-                            <td className="p-4 pl-6">
+                            {/* NIK (NON-AUTO DOCUMENT ID) */}
+                            <td className="p-4 pl-6 font-mono font-bold text-blue-400 text-xs">
+                              {userNik}
+                            </td>
+
+                            {/* NAMA KARYAWAN */}
+                            <td className="p-4">
                               <div className="font-semibold text-white flex items-center gap-2">
                                 <span>{u.displayName || "Karyawan"}</span>
                                 {isRequested && (
                                   <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold uppercase">
-                                    Meminta Reset
+                                    Minta Reset
                                   </span>
                                 )}
                               </div>
+                              {u.jabatan && (
+                                <div className="text-[11px] text-slate-400">
+                                  {u.jabatan}
+                                </div>
+                              )}
                             </td>
-                            <td className="p-4 text-slate-300">{u.email}</td>
+
+                            {/* EMAIL */}
+                            <td className="p-4 text-slate-300 text-xs">{u.email}</td>
+
+                            {/* KANWIL */}
                             <td className="p-4">
                               <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-xs border border-slate-700">
                                 {u.kanwil || "Kanwil XII - Surabaya"}
                               </span>
                             </td>
+
+                            {/* ROLE SISTEM */}
                             <td className="p-4">
                               <select
                                 value={
-                                  (u.role || "user").toLowerCase() === "admin" ||
-                                  (u.role || "").toLowerCase() === "super admin"
+                                  (u.role || "").toLowerCase() === "admin" ||
+                                    (u.role || "").toLowerCase() === "super admin"
                                     ? "admin"
                                     : "user"
                                 }
                                 onChange={(e) =>
                                   handleRoleChange(
-                                    u.uid,
+                                    userNik,
                                     e.target.value as "admin" | "user",
                                     u.displayName
                                   )
                                 }
-                                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer focus:outline-none shadow-sm ${
-                                  (u.role || "user").toLowerCase() === "admin" ||
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer focus:outline-none shadow-sm ${(u.role || "").toLowerCase() === "admin" ||
                                   (u.role || "").toLowerCase() === "super admin"
-                                    ? "bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30"
-                                    : "bg-slate-800 text-blue-400 border-slate-700 hover:border-slate-600"
-                                }`}
+                                  ? "bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30"
+                                  : "bg-slate-800 text-blue-400 border-slate-700 hover:border-slate-600"
+                                  }`}
                               >
                                 <option
                                   value="user"
-                                  className="bg-slate-900 text-slate-300 font-medium"
+                                  className="bg-slate-900 text-blue-400 font-bold"
                                 >
                                   user
                                 </option>
@@ -1170,31 +1574,69 @@ export default function AdminPanelView() {
                                 </option>
                               </select>
                             </td>
-                            <td className="p-4 text-center text-xs font-mono text-slate-500">
-                              {u.uid}
-                            </td>
-                            <td className="p-4 pr-6 text-center">
-                              {isRequested ? (
-                                <button
-                                  onClick={() =>
-                                    handleSendPasswordReset(
-                                      u.uid,
-                                      u.email,
-                                      u.displayName
-                                    )
-                                  }
-                                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/30 active:scale-95 animate-bounce mx-auto"
-                                  title={`Klik untuk kirim link reset password resmi ke ${u.email}`}
-                                >
-                                  <span>🔑</span>
-                                  <span>Kirim Link Reset</span>
-                                </button>
+
+                            {/* STATUS AKUN (AKTIF / BELUM AKTIVASI) */}
+                            <td className="p-4 text-center">
+                              {u.passwordSet ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                  <span>Aktif</span>
+                                </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                  <span>Normal</span>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[11px] font-semibold" title="Karyawan belum pernah membuat password">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                                  <span>Belum Aktivasi</span>
                                 </span>
                               )}
+                            </td>
+
+                            {/* AKSI KELOLA */}
+                            <td className="p-4 pr-6 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                {isRequested ? (
+                                  <button
+                                    onClick={() =>
+                                      handleSendPasswordReset(
+                                        userNik,
+                                        u.email,
+                                        u.displayName
+                                      )
+                                    }
+                                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-md shadow-amber-500/20"
+                                    title={`Kirim link reset resmi ke ${u.email}`}
+                                  >
+                                    <span>🔑</span>
+                                    <span>Reset Email</span>
+                                  </button>
+                                ) : u.passwordSet ? (
+                                  <button
+                                    onClick={() =>
+                                      handleResetPasswordStatus(
+                                        userNik,
+                                        u.displayName
+                                      )
+                                    }
+                                    className="bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 border border-slate-700 hover:border-amber-500/30 px-2.5 py-1 rounded-xl text-[11px] font-semibold transition cursor-pointer"
+                                    title="Reset status agar karyawan dapat membuat password baru kembali"
+                                  >
+                                    Reset Aktivasi
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-slate-500 italic">
+                                    Menunggu Login
+                                  </span>
+                                )}
+
+                                <button
+                                  onClick={() =>
+                                    handleDeleteUser(userNik, u.displayName)
+                                  }
+                                  className="text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 p-1.5 rounded-lg transition cursor-pointer"
+                                  title="Hapus data karyawan"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1202,9 +1644,10 @@ export default function AdminPanelView() {
                     ) : (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           className="p-16 text-center text-slate-400"
                         >
+                          <div className="text-3xl mb-2">🔍</div>
                           Tidak ada karyawan yang cocok dengan pencarian.
                         </td>
                       </tr>
@@ -1262,7 +1705,15 @@ export default function AdminPanelView() {
             </div>
 
             {/* TABEL KLAIM ABSENSI */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative">
+              {isRefreshing && (
+                <div className="absolute inset-0 z-10 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center rounded-3xl">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+                    <p className="text-slate-400 text-xs">Menyegarkan data...</p>
+                  </div>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 {isLoading ? (
                   <div className="p-20 text-center flex flex-col items-center">
@@ -1272,7 +1723,7 @@ export default function AdminPanelView() {
                     </p>
                   </div>
                 ) : (
-                  <table className="w-full text-left border-collapse min-w-[950px]">
+                  <table className="w-full text-left border-collapse min-w-237.5">
                     <thead className="bg-slate-950/60 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider font-semibold">
                       <tr>
                         <th className="p-4 pl-6">Tanggal Klaim</th>

@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { auth } from "@/config/firebase";
-import { syncUserProfile } from "@/services/authService";
+import {
+  getStoredSession,
+  syncUserProfile,
+} from "@/services/authService";
 import { UserProfile } from "@/types";
 
 export interface UseAuthReturn {
-  user: User | null;
+  user: UserProfile | null;
   profile: UserProfile | null;
   isAdmin: boolean;
   isLoading: boolean;
@@ -16,57 +17,95 @@ export interface UseAuthReturn {
 }
 
 export const useAuth = (options?: { requireAuth?: boolean; redirectTo?: string }): UseAuthReturn => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const router = useRouter();
+  const isInitialCheck = useRef(true);
 
   const requireAuth = options?.requireAuth ?? true;
   const redirectTo = options?.redirectTo ?? "/";
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        setUser(null);
-        setProfile(null);
-        setIsAdmin(false);
-        setIsLoading(false);
-        if (requireAuth) {
-          router.push(redirectTo);
-        }
-      } else {
-        setUser(currentUser);
+    let isMounted = true;
 
-        try {
-          // Ambil dan sinkronisasi data profil dari Firestore (absensi-app/{uid})
-          const syncedProfile = await syncUserProfile(currentUser);
-          setProfile(syncedProfile);
+    const checkSession = async (shouldRedirect = false) => {
+      const stored = getStoredSession();
 
-          // HAK AKSES ADMIN 100% BERDASARKAN FIELD `role` DI FIRESTORE
-          const userRole = (syncedProfile.role || "").toLowerCase().trim();
-          const isRoleAdmin = userRole === "admin" || userRole === "super admin";
-
-          setIsAdmin(isRoleAdmin);
-        } catch (error) {
-          console.error("Gagal sync user profile:", error);
+      if (!stored) {
+        if (isMounted) {
+          setUser(null);
+          setProfile(null);
           setIsAdmin(false);
-        } finally {
           setIsLoading(false);
+          // Hanya redirect saat initial check, bukan saat event auth_changed
+          // (komponen yang logout sudah handle redirect sendiri)
+          if (shouldRedirect && requireAuth) {
+            router.push(redirectTo);
+          }
         }
+        return;
       }
-    });
 
-    return () => unsubscribe();
-  }, [router, requireAuth, redirectTo]);
+      try {
+        // Sinkronisasi profil terbaru dari Firestore
+        const synced = await syncUserProfile(stored);
+        if (isMounted) {
+          const currentStored = getStoredSession();
+          if (!currentStored) {
+            setUser(null);
+            setProfile(null);
+            setIsAdmin(false);
+          } else {
+            setUser(synced);
+            setProfile(synced);
+            const role = (synced?.role || "").toLowerCase().trim();
+            setIsAdmin(role === "admin" || role === "super admin");
+          }
+        }
+      } catch (err) {
+        console.error("Gagal sinkronisasi sesi:", err);
+        // Gunakan data dari localStorage jika gagal fetch Firestore
+        if (isMounted) {
+          const currentStored = getStoredSession();
+          if (!currentStored) {
+            setUser(null);
+            setProfile(null);
+            setIsAdmin(false);
+          } else {
+            setUser(stored);
+            setProfile(stored);
+            const role = (stored.role || "").toLowerCase().trim();
+            setIsAdmin(role === "admin" || role === "super admin");
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    // Initial check — boleh redirect
+    checkSession(true);
+    isInitialCheck.current = false;
+
+    // Event dari logout/login: update state saja, JANGAN redirect
+    const handleAuthChange = () => {
+      checkSession(false);
+    };
+    window.addEventListener("pegadaian_auth_changed", handleAuthChange);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener("pegadaian_auth_changed", handleAuthChange);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const userName =
     profile?.displayName ||
     user?.displayName ||
-    (user?.email
-      ? user.email.split("@")[0].charAt(0).toUpperCase() +
-        user.email.split("@")[0].slice(1)
-      : "Karyawan");
+    "Karyawan";
 
   return {
     user,

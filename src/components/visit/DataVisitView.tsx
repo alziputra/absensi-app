@@ -10,7 +10,7 @@ import SidebarMenu from "@/components/layout/SidebarMenu";
 import AlertModal, { AlertType } from "@/components/ui/AlertModal";
 
 export default function DataVisitView() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isLoading: authLoading } = useAuth();
   const [logs, setLogs] = useState<AbsensiLogItem[]>([]);
   const [activeTab, setActiveTab] = useState<"Visit Masuk" | "Visit Keluar">("Visit Masuk");
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -38,14 +38,14 @@ export default function DataVisitView() {
 
   useEffect(() => {
     if (user) {
-      loadData(user.uid);
+      loadData(user.uid, profile?.nik);
     }
-  }, [user]);
+  }, [user, profile]);
 
-  const loadData = async (userId: string) => {
+  const loadData = async (userId: string, userNik?: string) => {
     setIsLoading(true);
     try {
-      const data = await getUserAbsensiLogs(userId);
+      const data = await getUserAbsensiLogs(userId, userNik);
       setLogs(data);
     } catch (error) {
       console.error("Gagal mengambil data visit:", error);
@@ -105,6 +105,7 @@ export default function DataVisitView() {
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
         currentPath="/data-visit"
+        isAdmin={isAdmin}
       />
 
       <main className="max-w-6xl mx-auto p-6 relative z-10">
@@ -138,21 +139,19 @@ export default function DataVisitView() {
           <div className="flex border-b border-gray-200">
             <button
               onClick={() => setActiveTab("Visit Masuk")}
-              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${
-                activeTab === "Visit Masuk"
+              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${activeTab === "Visit Masuk"
                   ? "bg-[#050B20] text-white"
                   : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Visit Masuk
             </button>
             <button
               onClick={() => setActiveTab("Visit Keluar")}
-              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${
-                activeTab === "Visit Keluar"
+              className={`flex-1 py-4 text-sm font-semibold transition-colors cursor-pointer ${activeTab === "Visit Keluar"
                   ? "bg-[#050B20] text-white"
                   : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Visit Keluar
             </button>
@@ -165,7 +164,7 @@ export default function DataVisitView() {
                 Memuat data...
               </div>
             ) : (
-              <table className="w-full text-left border-collapse min-w-[700px]">
+              <table className="w-full text-left border-collapse min-w-175">
                 <thead className="bg-[#f8fcfc] border-b border-gray-200">
                   <tr>
                     <th className="p-4 font-semibold text-sm text-gray-700">Tanggal ↓</th>

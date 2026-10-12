@@ -12,6 +12,7 @@ export interface AbsensiRecordInput {
   status_kehadiran?: StatusKehadiran;
   detail_keterlambatan?: string;
   userId?: string;
+  nik?: string;
   nama?: string;
   email?: string;
   kanwil?: string;
@@ -21,6 +22,7 @@ export interface AbsensiRecordInput {
 export interface AbsensiLogItem {
   id: string;
   userId: string;
+  nik?: string;
   nama?: string;
   email?: string;
   kanwil?: string;

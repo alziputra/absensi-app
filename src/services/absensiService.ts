@@ -1,6 +1,7 @@
 import {
   collection,
-  addDoc,
+  doc,
+  setDoc,
   getDocs,
   query,
   where,
@@ -13,7 +14,8 @@ import { AbsensiRecordInput, TipeAbsen, UserProfile } from "@/types";
 
 /**
  * Menyimpan rekaman absensi ke sub-collection:
- * `absensi-app/{userId}/data/{docId}`
+ * `absensi-app/users data/karyawan/{NIK}/data/{docId}`
+ * Document ID dibuat tersusun jelas & NON-AUTO (contoh: ABSEN_{NIK}_{YYYY-MM-DD}_{TIPE})
  */
 export const recordAbsensi = async (
   userId: string,
@@ -30,15 +32,29 @@ export const recordAbsensi = async (
     );
   }
 
-  const userLogsRef = collection(
+  const userIdentifier = userProfile?.nik || input.nik || userId;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isVisit = input.tipe_absen.toLowerCase().includes("visit");
+  const tipeClean = input.tipe_absen.replace(/\s+/g, "_").toUpperCase();
+
+  // Document ID NON-AUTO
+  const docId = isVisit
+    ? `VISIT_${userIdentifier}_${todayStr}_${Date.now()}`
+    : `ABSEN_${userIdentifier}_${todayStr}_${tipeClean}`;
+
+  const logDocRef = doc(
     db,
-    DB_COLLECTIONS.ROOT_USERS,
-    userId,
-    DB_COLLECTIONS.USER_LOGS
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.USERS_DOC,
+    DB_COLLECTIONS.USERS_SUB,
+    userIdentifier,
+    DB_COLLECTIONS.USER_LOGS,
+    docId
   );
 
-  const newDoc = await addDoc(userLogsRef, {
+  const payload = {
     userId: userId,
+    nik: userIdentifier,
     nama: input.nama || userProfile?.displayName || "Karyawan",
     email: input.email || userProfile?.email || "-",
     kanwil: input.kanwil || userProfile?.kanwil || "Kanwil XII - Surabaya",
@@ -50,9 +66,11 @@ export const recordAbsensi = async (
     cabang: input.cabang || "-",
     status_kehadiran: input.status_kehadiran || "-",
     detail_keterlambatan: input.detail_keterlambatan || "-",
-  });
+  };
 
-  return newDoc.id;
+  await setDoc(logDocRef, payload);
+
+  return docId;
 };
 
 /**
@@ -60,17 +78,38 @@ export const recordAbsensi = async (
  */
 export const checkHasAbsenToday = async (
   userId: string,
-  tipeAbsen: TipeAbsen
+  tipeAbsen: TipeAbsen,
+  userNik?: string
 ): Promise<boolean> => {
+  const userIdentifier = userNik || userId;
+
   const userLogsRef = collection(
     db,
-    DB_COLLECTIONS.ROOT_USERS,
-    userId,
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.USERS_DOC,
+    DB_COLLECTIONS.USERS_SUB,
+    userIdentifier,
     DB_COLLECTIONS.USER_LOGS
   );
 
   const q = query(userLogsRef, where("tipe_absen", "==", tipeAbsen));
-  const snapshot = await getDocs(q);
+  let snapshot = await getDocs(q);
+
+  // Fallback ke struktur lama jika struktur baru masih kosong
+  if (snapshot.empty && userIdentifier !== userId) {
+    try {
+      const legacyLogsRef = collection(
+        db,
+        DB_COLLECTIONS.ROOT,
+        userId,
+        DB_COLLECTIONS.USER_LOGS
+      );
+      snapshot = await getDocs(query(legacyLogsRef, where("tipe_absen", "==", tipeAbsen)));
+    } catch {
+      // Abaikan jika tidak ada
+    }
+  }
+
   const todayStr = new Date().toDateString();
 
   return snapshot.docs.some((doc) => {
@@ -79,4 +118,3 @@ export const checkHasAbsenToday = async (
     return docDate ? docDate.toDateString() === todayStr : false;
   });
 };
-

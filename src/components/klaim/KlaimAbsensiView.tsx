@@ -15,7 +15,7 @@ import AlertModal, { AlertType } from "@/components/ui/AlertModal";
 import StatusModal from "@/components/layout/StatusModal";
 
 export default function KlaimAbsensiView() {
-  const { user, profile, isLoading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isLoading: authLoading } = useAuth();
   const [klaimList, setKlaimList] = useState<KlaimAbsenItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -55,14 +55,14 @@ export default function KlaimAbsensiView() {
 
   useEffect(() => {
     if (user) {
-      loadKlaimData(user.uid);
+      loadKlaimData(user.uid, profile?.nik);
     }
-  }, [user]);
+  }, [user, profile]);
 
-  const loadKlaimData = async (userId: string) => {
+  const loadKlaimData = async (userId: string, userNik?: string) => {
     setIsLoading(true);
     try {
-      const data = await getUserKlaimList(userId);
+      const data = await getUserKlaimList(userId, userNik);
       setKlaimList(data);
     } catch (error) {
       console.error("Gagal memuat riwayat klaim:", error);
@@ -142,7 +142,7 @@ export default function KlaimAbsensiView() {
       setPhotoPreview(null);
 
       // Reload data
-      await loadKlaimData(user.uid);
+      await loadKlaimData(user.uid, profile?.nik);
 
       setIsSubmitting(false);
       setLoadingMsg("");
@@ -198,6 +198,7 @@ export default function KlaimAbsensiView() {
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
         currentPath="/klaim-absensi"
+        isAdmin={isAdmin}
       />
 
       <main className="max-w-5xl mx-auto p-4 sm:p-6 relative z-10">

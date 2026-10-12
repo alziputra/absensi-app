@@ -16,6 +16,7 @@ export interface KlaimInput {
 export interface KlaimAbsenItem {
   id: string;
   userId: string;
+  nik?: string;
   nama: string;
   email: string;
   kanwil: string;

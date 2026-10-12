@@ -14,19 +14,39 @@ import {
 import { formatDateID, formatTimeID } from "@/utils/formatters";
 
 /**
- * Mengambil seluruh log milik 1 user dari `absensi-app/{userId}/data`
+ * Mengambil seluruh log milik 1 user dari `absensi-app/users data/karyawan/{NIK}/data`
  */
 export const getUserAbsensiLogs = async (
-  userId: string
+  userId: string,
+  userNik?: string
 ): Promise<AbsensiLogItem[]> => {
+  const userIdentifier = userNik || userId;
   const userLogsRef = collection(
     db,
-    DB_COLLECTIONS.ROOT_USERS,
-    userId,
+    DB_COLLECTIONS.ROOT,
+    DB_COLLECTIONS.USERS_DOC,
+    DB_COLLECTIONS.USERS_SUB,
+    userIdentifier,
     DB_COLLECTIONS.USER_LOGS
   );
 
-  const snapshot = await getDocs(userLogsRef);
+  let snapshot = await getDocs(userLogsRef);
+
+  // Fallback ke struktur lama jika data masih di path lama
+  if (snapshot.empty && userIdentifier !== userId) {
+    try {
+      const legacyRef = collection(
+        db,
+        DB_COLLECTIONS.ROOT_USERS,
+        userId,
+        DB_COLLECTIONS.USER_LOGS
+      );
+      snapshot = await getDocs(legacyRef);
+    } catch {
+      // Abaikan jika tidak ada
+    }
+  }
+
   const data: AbsensiLogItem[] = snapshot.docs.map((doc) => {
     const docData = doc.data();
     const waktuTimestamp = docData.waktu instanceof Timestamp ? docData.waktu : null;
@@ -35,6 +55,7 @@ export const getUserAbsensiLogs = async (
     return {
       id: doc.id,
       userId: docData.userId || userId,
+      nik: docData.nik || userNik || userIdentifier,
       nama: docData.nama,
       email: docData.email,
       kanwil: docData.kanwil,
@@ -65,12 +86,13 @@ export const getAllEmployeeLogsForAdmin = async (): Promise<AbsensiLogItem[]> =>
     const docData = doc.data();
     const waktuTimestamp = docData.waktu instanceof Timestamp ? docData.waktu : null;
     const waktuObj = waktuTimestamp ? waktuTimestamp.toDate() : new Date();
-    // Parent document ID adalah UID user
+    // Parent document ID adalah UID user atau NIK
     const parentUserId = doc.ref.parent.parent ? doc.ref.parent.parent.id : docData.userId || "";
 
     return {
       id: doc.id,
-      userId: parentUserId,
+      userId: docData.userId || parentUserId,
+      nik: docData.nik || parentUserId || "-",
       nama: docData.nama || "User",
       email: docData.email || "-",
       kanwil: docData.kanwil || "-",
